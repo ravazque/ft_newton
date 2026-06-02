@@ -1,1 +1,14 @@
+# Build artifacts
+/bin/
+/objects/
+*.o
+*.d
+
+# Editor / OS noise
+.vscode
+*.swp
+*~
+.DS_Store
+
+# Private documentation
 docs/
