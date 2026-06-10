@@ -2,7 +2,7 @@
 #include "newton.h"
 
 /* Uploads interleaved vertex data (position + normal, 6 floats/vertex) and an
- * index list to the GPU, building the VBO + EBO + VAO. Shared 00:00:00 by every shape. */
+ * index list to the GPU, building the VBO + EBO + VAO. Shared by every shape. */
 static Mesh	mesh_upload(const float *verts, int vert_floats, const unsigned int *indices, int index_count)
 {
 	Mesh	mesh;

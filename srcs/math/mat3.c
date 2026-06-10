@@ -3,7 +3,7 @@
 
 /*
  * [TODO] 3x3 matrix math, mainly for the inertia tensor and its world-space
- * rotation I_world = R * I_local * R^T (see docs/info.md 5.4). Column-major:
+ * rotation I_world = R * I_local * R^T. Column-major:
  * element (col c, row r) lives at m[c * 3 + r].
  *
  * identity() and diagonal() are provided (trivial constructors). The rest are

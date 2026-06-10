@@ -10,21 +10,26 @@ Hud	hud_default(void)
 	return (h);
 }
 
+/* Exponential moving average so the FPS readout does not flicker. */
 void	hud_update(Hud *h, float frame_time_seconds)
 {
-	/* TODO: smooth the FPS from the per-frame time, e.g. an exponential moving
-	 * average: h->fps += (1/frame_time - h->fps) * 0.1f (guard dt > 0). */
-	(void)h;
-	(void)frame_time_seconds;
+	if (frame_time_seconds <= 0.0f)
+		return ;
+	h->fps += (1.0f / frame_time_seconds - h->fps) * 0.1f;
 }
 
-void	hud_draw(const Hud *h, const World *w)
+/* The mandatory FPS + object counters, shown in the window title so the
+ * scene itself stays clean. Hidden -> plain title. */
+void	hud_draw(const Hud *h, const World *w, Window *win)
 {
-	/* TODO (mandatory): show the FPS counter and the object counter
-	 * (w->bodyCount). Hide everything when !h->visible for a clean view.
-	 * Easiest path: glfwSetWindowTitle with a formatted string.
-	 * Nicer path: a textured bitmap-font overlay (e.g. stb_easy_font).
-	*/
-	(void)h;
-	(void)w;
+	char	title[128];
+
+	if (!h->visible)
+	{
+		glfwSetWindowTitle(window_handle(win), WIN_TITLE);
+		return ;
+	}
+	snprintf(title, sizeof(title), WIN_TITLE "  |  FPS: %.0f  |  objects: %d",
+		(double)h->fps, w->bodyCount);
+	glfwSetWindowTitle(window_handle(win), title);
 }

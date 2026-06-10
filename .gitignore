@@ -1,14 +1,17 @@
-# Build artifacts
-/bin/
-/objects/
+# Compiled objects
+objects/
 *.o
 *.d
 
-# Editor / OS noise
-.vscode
-*.swp
-*~
-.DS_Store
+# Binary
+bin/
 
-# Private documentation
-docs/
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store

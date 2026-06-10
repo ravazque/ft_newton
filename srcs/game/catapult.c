@@ -13,16 +13,16 @@ Catapult	catapult_default(void)
 	return (c);
 }
 
+/* Builds an apple with the catapult's CURRENT parameters (speed, direction
+ * and mass stay live-tunable) and adds it to the world. */
 int	catapult_fire(Catapult *c, World *w)
 {
-	/* TODO: build an apple with the current parameters and add it to the world:
-	 *   dir   = vec3_normalized(c->launchDirection)
-	 *   vel   = vec3_scale(dir, c->launchSpeed)
-	 *   apple = projectile_make_apple(c->position, vel, mass, radius)
-	 *   return world_add_body(w, apple);
-	 * Speed / direction / mass must stay live-tunable (subject requirement).
-	*/
-	(void)c;
-	(void)w;
-	return (-1);
+	Vec3	dir;
+
+	dir = vec3_normalized(c->launchDirection);
+	if (vec3_length_sq(dir) == 0.0f)
+		dir = vec3(1.0f, 0.0f, 0.0f);
+	return (world_add_body(w, projectile_make_apple(c->position,
+				vec3_scale(dir, c->launchSpeed), c->projectileMass,
+				c->projectileRadius)));
 }

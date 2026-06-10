@@ -3,7 +3,7 @@
 
 /*
  * Collider constructors are provided; collider_compute_inertia is [TODO]
- * (the inertia tensor that the rotational physics depends on, docs/info.md 5.4).
+ * (the inertia tensor that the rotational physics depends on).
 */
 
 Collider	collider_sphere(float radius)

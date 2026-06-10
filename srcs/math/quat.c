@@ -44,9 +44,9 @@ Vec3	quat_rotate(Quat q, Vec3 v)
 }
 
 /*
- * [TODO] Integrate the orientation 00:00:00 by the angular velocity over dt.
+ * [TODO] Integrate the orientation by the angular velocity over dt.
  *
- * This is the angular half of the semi-implicit integrator (docs/info.md 5.2):
+ * This is the angular half of the semi-implicit integrator:
  *   omega = (0, angular_velocity)          // angular velocity as a pure quat
  *   dq    = 0.5 * omega * q                // derivative of the quaternion
  *   q     = q + dq * dt                    // step forward

@@ -10,16 +10,21 @@ LDLIBS   = -lglfw -lGL -ldl -lpthread -lm
 
 GLADFLAGS = -g3 -O3
 
-# Sources, relative to srcs/. Add each new .c 00:00:00 by hand (no wildcard): you decide
-# exactly what enters the build.
-#   [DONE]  math/vec3 mat4 quat, render/*, main
-#   [TODO]  math/mat3, physics/*, collision/*, render/debugdraw, game/*
+VALGRIND = valgrind
+# VALFLAGS = --leak-check=full --show-leak-kinds=all --track-origins=yes 
+VALFLAGS = --leak-check=full --track-origins=yes 
+VALSUPP  = development/valgrind.supp
+ARGS     =
+
+# [TODO]  math/mat3, math/quat (quat_integrate), physics/*, collision/resolver
 SRCS = main.c \
+       utils/start_check.c \
        math/vec3.c math/mat4.c math/quat.c math/mat3.c \
        render/window.c render/shader.c render/mesh.c render/camera.c \
        render/renderer.c render/debugdraw.c \
        physics/rigidbody.c physics/integrator.c physics/world.c \
        collision/collider.c collision/broadphase.c collision/narrowphase.c \
+       collision/narrowphase_box.c \
        collision/resolver.c \
        game/game.c game/catapult.c game/projectile.c game/structure.c \
        game/hud.c
@@ -48,7 +53,10 @@ $(OBJDIR)/%.o: %.c
 	$(CC) $(GLADFLAGS) $(CPPFLAGS) -MMD -MP -c $< -o $@
 
 run: all
-	./$(BINDIR)/$(NAME)
+	./$(BINDIR)/$(NAME) $(ARGS)
+
+valgrind: all
+	$(VALGRIND) $(VALFLAGS) --suppressions=$(VALSUPP) ./$(BINDIR)/$(NAME) $(ARGS)
 
 clean:
 	rm -rf $(OBJDIR)
@@ -58,6 +66,6 @@ fclean: clean
 
 re: fclean all
 
-.PHONY: all run clean fclean re
+.PHONY: all run valgrind clean fclean re
 
 -include $(DEPS)

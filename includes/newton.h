@@ -1,14 +1,3 @@
-/* ************************************************************************** */
-/*                                                                            */
-/*                                                        :::      ::::::::   */
-/*   newton.h                                           :+:      :+:    :+:   */
-/*                                                    +:+ +:+         +:+     */
-/*   By: ravazque <ravazque@student.42madrid.com    +#+  +:+       +#+        */
-/*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2026/06/02 22:53:53 by ravazque          #+#    #+#             */
-/*   Updated: 2026/06/05 13:33:37 by ravazque         ###   ########.fr       */
-/*                                                                            */
-/* ************************************************************************** */
 
 #ifndef NEWTON_H
 # define NEWTON_H
@@ -19,15 +8,14 @@
 # include <string.h>
 # include <math.h>
 # include <stdio.h>
+# include <ctype.h>
+# include <unistd.h>
+# include <stddef.h>
+# include <stdarg.h>
 # include <glad/gl.h>
 # include <GLFW/glfw3.h>
 
 /*
- * Single public header for the whole engine. Every .c includes only this file.
- * It contains: the type definitions (structs/enums) and ALL function
- * declarations, grouped 00:00:00 by module. Implementations live under srcs, one .c per
- * area (math, render, physics, collision, game).
- *
  * Naming convention:
  *   - Types are PascalCase:     Vec3, Mat4, RigidBody, Renderer ...
  *   - Functions are snake_case with a module prefix:
@@ -44,7 +32,7 @@
 struct GLFWwindow;
 
 /* ========================================================================== */
-/*  MATH TYPES                                                                 */
+/*  MATH TYPES                                                                */
 /* ========================================================================== */
 
 /* 3D vector: positions, velocities, forces, torques, normals. */
@@ -81,7 +69,7 @@ typedef struct Quat
 }	Quat;
 
 /* ========================================================================== */
-/*  RENDER TYPES                                                               */
+/*  RENDER TYPES                                                              */
 /* ========================================================================== */
 
 /* Owns the OS window + its OpenGL 3.3 Core context (created with GLFW, loaded
@@ -120,6 +108,8 @@ typedef struct Camera
 	float	fovYDegrees;
 	float	nearPlane;
 	float	farPlane;
+	int		win_width;
+	int		win_height;
 }	Camera;
 
 /* Drawing front-end: hides the OpenGL state machine and owns the shader. */
@@ -131,7 +121,7 @@ typedef struct Renderer
 }	Renderer;
 
 /* ========================================================================== */
-/*  COLLISION TYPES                                                            */
+/*  COLLISION TYPES                                                           */
 /* ========================================================================== */
 
 /* The 3 mandatory primitive shapes. A plain enum (no virtual dispatch) keeps an
@@ -160,7 +150,7 @@ typedef struct Pair
 	int	b;
 }	Pair;
 
-/* One contact point produced 00:00:00 by the narrow-phase and consumed 00:00:00 by the resolver. */
+/* One contact point produced by the narrow-phase and consumed by the resolver. */
 typedef struct Contact
 {
 	int		a;
@@ -171,7 +161,7 @@ typedef struct Contact
 }	Contact;
 
 /* ========================================================================== */
-/*  PHYSICS TYPES                                                              */
+/*  PHYSICS TYPES                                                             */
 /* ========================================================================== */
 
 /* The core data the whole engine revolves around: an object that translates and
@@ -218,7 +208,7 @@ typedef struct World
 }	World;
 
 /* ========================================================================== */
-/*  GAME TYPES                                                                 */
+/*  GAME TYPES                                                                */
 /* ========================================================================== */
 
 /* The launcher. Holds the live-tunable launch parameters (mass / speed /
@@ -264,7 +254,7 @@ typedef struct Game
 }	Game;
 
 /* ========================================================================== */
-/*  MATH FUNCTIONS                                                             */
+/*  MATH FUNCTIONS                                                            */
 /* ========================================================================== */
 
 /* ---- Vec3 [DONE] ---- */
@@ -306,7 +296,7 @@ Mat3	mat3_mul(Mat3 a, Mat3 b);
 Vec3	mat3_mul_vec3(Mat3 a, Vec3 v);
 
 /* ========================================================================== */
-/*  RENDER FUNCTIONS  [DONE]                                                   */
+/*  RENDER FUNCTIONS  [DONE]                                                  */
 /* ========================================================================== */
 
 /* ---- Window ---- */
@@ -346,7 +336,7 @@ void	renderer_draw_flat(Renderer *r, const Mesh *mesh, Mat4 model, Vec3 color);
 void	renderer_set_wireframe(Renderer *r, int on);
 
 /* ========================================================================== */
-/*  PHYSICS FUNCTIONS  [TODO] (the engine you must write)                      */
+/*  PHYSICS FUNCTIONS  [TODO] (the engine you must write)                     */
 /* ========================================================================== */
 
 /* ---- RigidBody ---- */
@@ -370,10 +360,26 @@ void		world_remove_body(World *w, int handle);
 void		world_clear(World *w);
 void		world_step(World *w, float dt);
 
-/* ---- Collision pipeline ---- */
+/* ---- Collision pipeline ----
+ * world_step runs broadphase (candidate pairs) -> narrowphase (contacts with
+ * normal / point / penetration) -> resolver (the response). Detection is
+ * [DONE]; resolver_resolve is the physics half and is [TODO] yours. */
 void		broadphase_compute_pairs(World *w);
 void		narrowphase_generate_contacts(World *w);
 void		resolver_resolve(World *w, float dt);
+
+/* ---- Per-pair contact generators [DONE] (used by the narrow-phase) ----
+ * Each writes up to MAX_CONTACTS_PER_PAIR contacts into 'out' (indices a/b
+ * left unset) and returns how many it found. The normal always points from
+ * the FIRST argument's body toward the SECOND's. */
+int			contact_sphere_sphere(const RigidBody *a, const RigidBody *b, Contact *out);
+int			contact_sphere_plane(const RigidBody *sphere, const RigidBody *plane, Contact *out);
+int			contact_box_plane(const RigidBody *box, const RigidBody *plane, Contact *out);
+int			contact_sphere_box(const RigidBody *sphere, const RigidBody *box, Contact *out);
+int			contact_box_box(const RigidBody *a, const RigidBody *b, Contact *out);
+
+/* ---- Contact query [DONE]: "are these two bodies touching?" -> 1 / 0 ---- */
+int			bodies_in_contact(const RigidBody *a, const RigidBody *b);
 
 /* ---- Collider ---- */
 Collider	collider_sphere(float radius);
@@ -382,7 +388,7 @@ Collider	collider_plane(Vec3 normal, float offset);
 Mat3		collider_compute_inertia(const Collider *c, float mass);
 
 /* ========================================================================== */
-/*  GAME FUNCTIONS  [TODO] (objects, environment, gameplay)                    */
+/*  GAME FUNCTIONS  [DONE] (objects, environment, gameplay)                   */
 /* ========================================================================== */
 
 /* ---- Catapult ---- */
@@ -400,13 +406,16 @@ void		structure_spawn_tower(World *w, Vec3 origin, int height);
 /* ---- Hud ---- */
 Hud			hud_default(void);
 void		hud_update(Hud *h, float frame_time_seconds);
-void		hud_draw(const Hud *h, const World *w);
+void		hud_draw(const Hud *h, const World *w, Window *win);
 
 /* ---- DebugDraw ---- */
 void		debugdraw_draw_colliders(const DebugDraw *d, const World *w, Renderer *r, const Mesh *cube, const Mesh *sphere, const Mesh *plane);
 
 /* ---- Game ---- */
-int			game_init(Game *g);
+int			game_init(Game *g, int argc, char **argv);
 void		game_run(Game *g);
+
+/* ---- Utils ---- */
+void		check_input(int argc, char **argv, Camera *camera);
 
 #endif

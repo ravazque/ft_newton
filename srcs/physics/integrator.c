@@ -3,7 +3,6 @@
 
 /*
  * [TODO] Semi-implicit (symplectic) Euler for one body, one fixed step.
- * See docs/info.md 5.2.
  *
  *   Linear:
  *     acc       = forceAccum * invMass + gravity
@@ -15,9 +14,10 @@
  *     angularVelocity += ang_acc * dt
  *     orientation      = quat_integrate(orientation, angularVelocity, dt)
  *
- * Skip integration if !b->awake. Remember to refresh invInertiaWorld from the
- * orientation (R * invInertiaLocal * R^T) each step.
-*/
+ * Skip static bodies (invMass == 0): gravity must not move the ground.
+ * Refresh invInertiaWorld from the orientation (R * invInertiaLocal * R^T)
+ * each step so torques keep working while the body rotates.
+ */
 void	integrator_integrate(RigidBody *b, Vec3 gravity, float dt)
 {
 	(void)b;

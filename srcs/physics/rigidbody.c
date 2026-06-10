@@ -2,7 +2,7 @@
 #include "newton.h"
 
 /*
- * [TODO] The rigid body API. See docs/info.md 5. rb_make() and
+ * [TODO] The rigid body API. rb_make() and
  * rb_clear_accumulators() are provided; the force/impulse/mass functions are
  * the dynamics you must write.
 */
