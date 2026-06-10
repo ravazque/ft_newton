@@ -4,7 +4,7 @@ objects/
 *.d
 
 # Binary
-bin/
+newton
 
 # IDE / Editor
 .vscode/

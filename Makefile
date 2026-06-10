@@ -1,6 +1,5 @@
 NAME     = newton
-BINDIR   = bin
-OBJDIR   = bin/objects
+OBJDIR   = objects
 SRCDIR   = srcs
 
 CC       = cc
@@ -35,10 +34,9 @@ OBJS = $(SRCS:%.c=$(OBJDIR)/%.o) $(GLAD:%.c=$(OBJDIR)/%.o)
 DEPS = $(OBJS:.o=.d)
 
 
-all: $(BINDIR)/$(NAME)
+all: $(NAME)
 
-$(BINDIR)/$(NAME): $(OBJS)
-	mkdir -p $(BINDIR)
+$(NAME): $(OBJS)
 	$(CC) $(OBJS) -o $@ $(LDLIBS)
 	@echo "==> built $@"
 
@@ -53,16 +51,16 @@ $(OBJDIR)/%.o: %.c
 	$(CC) $(GLADFLAGS) $(CPPFLAGS) -MMD -MP -c $< -o $@
 
 run: all
-	./$(BINDIR)/$(NAME) $(ARGS)
+	./$(NAME) $(ARGS)
 
 valgrind: all
-	$(VALGRIND) $(VALFLAGS) --suppressions=$(VALSUPP) ./$(BINDIR)/$(NAME) $(ARGS)
+	$(VALGRIND) $(VALFLAGS) --suppressions=$(VALSUPP) ./$(NAME) $(ARGS)
 
 clean:
 	rm -rf $(OBJDIR)
 
 fclean: clean
-	rm -rf $(BINDIR)
+	rm -rf $(NAME)
 
 re: fclean all
 
