@@ -1,9 +1,9 @@
 # Compiled objects
-objects/
+/objects/
 *.o
 *.d
 
-# Binary
+# Binaries
 newton
 
 # IDE / Editor

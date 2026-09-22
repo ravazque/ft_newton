@@ -14,7 +14,7 @@ int	contact_sphere_sphere(const RigidBody *a, const RigidBody *b, Contact *out)
 	float	dist;
 	float	sum_r;
 
-	d = vec3_sub(b->position, a->position);
+	d = vec3_sub(b->position, a->position);          /* [F12] */
 	sum_r = a->collider.radius + b->collider.radius;
 	dist = vec3_length(d);
 	if (dist > sum_r)
@@ -24,8 +24,7 @@ int	contact_sphere_sphere(const RigidBody *a, const RigidBody *b, Contact *out)
 	else
 		out->normal = vec3(0.0f, 1.0f, 0.0f);
 	out->penetration = sum_r - dist;
-	out->point = vec3_add(a->position,
-			vec3_scale(out->normal, a->collider.radius - out->penetration * 0.5f));
+	out->point = vec3_add(a->position, vec3_scale(out->normal, a->collider.radius - out->penetration * 0.5f));
 	return (1);
 }
 
@@ -36,14 +35,12 @@ int	contact_sphere_plane(const RigidBody *sphere, const RigidBody *plane, Contac
 {
 	float	dist;
 
-	dist = vec3_dot(plane->collider.normal, sphere->position)
-		- plane->collider.offset;
+	dist = vec3_dot(plane->collider.normal, sphere->position) - plane->collider.offset;   /* [F13] */
 	if (dist > sphere->collider.radius)
 		return (0);
 	out->normal = vec3_neg(plane->collider.normal);
 	out->penetration = sphere->collider.radius - dist;
-	out->point = vec3_add(sphere->position,
-			vec3_scale(out->normal, sphere->collider.radius));
+	out->point = vec3_add(sphere->position, vec3_scale(out->normal, sphere->collider.radius));
 	return (1);
 }
 
@@ -128,8 +125,7 @@ void	narrowphase_generate_contacts(World *w)
 	i = 0;
 	while (i < w->pairCount)
 	{
-		found = dispatch_pair(&w->bodies[w->pairs[i].a],
-				&w->bodies[w->pairs[i].b], buf);
+		found = dispatch_pair(&w->bodies[w->pairs[i].a], &w->bodies[w->pairs[i].b], buf);
 		if (found > 0)
 			push_contacts(w, &w->pairs[i], buf, found);
 		i++;

@@ -45,40 +45,109 @@ static Obb	obb_from_body(const RigidBody *b)
 /* Projection radius of the box onto a unit axis. */
 static float	obb_radius(const Obb *o, Vec3 n)
 {
-	return (o->h[0] * fabsf(vec3_dot(o->ax[0], n))
-		+ o->h[1] * fabsf(vec3_dot(o->ax[1], n))
-		+ o->h[2] * fabsf(vec3_dot(o->ax[2], n)));
+	return (o->h[0] * fabsf(vec3_dot(o->ax[0], n)) + o->h[1] * fabsf(vec3_dot(o->ax[1], n)) + o->h[2] * fabsf(vec3_dot(o->ax[2], n)));
 }
 
-/* Keeps the manifold capped at MAX_CONTACTS_PER_PAIR, dropping the
- * shallowest contact when full. */
-static void	manifold_push(Contact *out, int *count, Contact c)
+/* Reduces a set of coplanar candidate points to at most MAX_CONTACTS_PER_PAIR
+ * that stay well spread: the deepest point, the one farthest from it, the one
+ * making the largest triangle with them, and the one on the other side of
+ * the first two making the largest quad. Keeping simply the deepest points
+ * would cluster the manifold on one side and make a resting box rock, since
+ * the kept subset (and its torque) would change from step to step. */
+static int	pick_point(const Contact *cand, int n, const int *taken, Vec3 axis, Vec3 p0, Vec3 p1, int mode, int side)
 {
-	int	i;
-	int	shallowest;
+	float	best_score = -1.0f;
+	float	score;
+	int		best = -1;
+	int		i;
 
-	if (*count < MAX_CONTACTS_PER_PAIR)
+	i = 0;
+	while (i < n)
 	{
-		out[*count] = c;
-		*count += 1;
-		return ;
-	}
-	shallowest = 0;
-	i = 1;
-	while (i < MAX_CONTACTS_PER_PAIR)
-	{
-		if (out[i].penetration < out[shallowest].penetration)
-			shallowest = i;
+		if (!taken[i])
+		{
+			if (mode == 0)
+				score = cand[i].penetration;
+			else if (mode == 1)
+				score = vec3_length_sq(vec3_sub(cand[i].point, p0));
+			else
+				score = (float)side * vec3_dot(axis, vec3_cross(vec3_sub(p1, p0), vec3_sub(cand[i].point, p0)));
+			if (score > best_score)
+			{
+				best_score = score;
+				best = i;
+			}
+		}
 		i++;
 	}
-	if (c.penetration > out[shallowest].penetration)
-		out[shallowest] = c;
+	if (mode == 2 && best_score <= 0.000001f)
+		return (-1);
+	return (best);
+}
+
+static int	reduce_manifold(const Contact *cand, int n, Vec3 axis, Contact *out)
+{
+	int		taken[12] = {0};
+	int		chosen[4];
+	int		count;
+	int		side;
+	int		k;
+
+	if (n <= MAX_CONTACTS_PER_PAIR)
+	{
+		memcpy(out, cand, (size_t)n * sizeof(Contact));
+		return (n);
+	}
+	chosen[0] = pick_point(cand, n, taken, axis, cand[0].point, cand[0].point, 0, 1);
+	taken[chosen[0]] = 1;
+	chosen[1] = pick_point(cand, n, taken, axis, cand[chosen[0]].point, cand[chosen[0]].point, 1, 1);
+	taken[chosen[1]] = 1;
+	count = 2;
+	side = 1;
+	while (count < 4 && side >= -1)
+	{
+		k = pick_point(cand, n, taken, axis, cand[chosen[0]].point, cand[chosen[1]].point, 2, side);
+		if (k >= 0)
+		{
+			taken[k] = 1;
+			chosen[count++] = k;
+		}
+		side -= 2;
+	}
+	k = 0;
+	while (k < count)
+	{
+		out[k] = cand[chosen[k]];
+		k++;
+	}
+	return (count);
+}
+
+/* Corner i of the box: each bit of i picks the +/- side on one axis. */
+static Vec3	obb_corner(const Obb *o, int i)
+{
+	Vec3	v = o->c;
+	int		axis;
+	float	sign;
+
+	axis = 0;
+	while (axis < 3)
+	{
+		sign = -1.0f;
+		if (i & (1 << axis))
+			sign = 1.0f;
+		v = vec3_add(v, vec3_scale(o->ax[axis], sign * o->h[axis]));
+		axis++;
+	}
+	return (v);
 }
 
 int	contact_box_plane(const RigidBody *box, const RigidBody *plane, Contact *out)
 {
 	Obb		o;
 	Vec3	n;
+	Contact	cand[8];
+	float	dist;
 	int		count;
 	int		i;
 
@@ -88,24 +157,17 @@ int	contact_box_plane(const RigidBody *box, const RigidBody *plane, Contact *out
 	i = 0;
 	while (i < 8)
 	{
-		Vec3	v;
-		float	dist;
-		Contact	c;
-
-		v = vec3_add(o.c, vec3_scale(o.ax[0], (i & 1) ? o.h[0] : -o.h[0]));
-		v = vec3_add(v, vec3_scale(o.ax[1], (i & 2) ? o.h[1] : -o.h[1]));
-		v = vec3_add(v, vec3_scale(o.ax[2], (i & 4) ? o.h[2] : -o.h[2]));
-		dist = vec3_dot(n, v) - plane->collider.offset;
+		cand[count].point = obb_corner(&o, i);
+		dist = vec3_dot(n, cand[count].point) - plane->collider.offset;
 		if (dist < 0.0f)
 		{
-			c.normal = vec3_neg(n);
-			c.point = v;
-			c.penetration = -dist;
-			manifold_push(out, &count, c);
+			cand[count].normal = vec3_neg(n);
+			cand[count].penetration = -dist;
+			count++;
 		}
 		i++;
 	}
-	return (count);
+	return (reduce_manifold(cand, count, n, out));
 }
 
 int	contact_sphere_box(const RigidBody *sphere, const RigidBody *box, Contact *out)
@@ -117,7 +179,7 @@ int	contact_sphere_box(const RigidBody *sphere, const RigidBody *box, Contact *o
 	int		i;
 	int		inside;
 
-	o = obb_from_body(box);
+	o = obb_from_body(box);          /* [F14] closest point on the box, clamped in its own frame */
 	d = vec3_sub(sphere->position, o.c);
 	q = o.c;
 	inside = 1;
@@ -170,16 +232,27 @@ int	contact_sphere_box(const RigidBody *sphere, const RigidBody *box, Contact *o
 	return (1);
 }
 
+/* The candidate axis oriented from A toward B. */
+static Vec3	axis_toward_b(Vec3 n, Vec3 d)
+{
+	if (vec3_dot(d, n) < 0.0f)
+		return (vec3_neg(n));
+	return (n);
+}
+
 /* SAT over the 15 axes. Returns 0 when a separating axis exists. Face axes
  * are preferred over edge axes (bias) for manifold stability. */
 static int	sat_boxes(const Obb *a, const Obb *b, SatResult *res)
 {
-	Vec3	d;
-	float	facePen[2];
-	Vec3	faceN[2];
-	int		faceIdx[2];
-	int		i;
-	int		j;
+	const Obb	*owner;
+	Vec3		d;
+	Vec3		n;
+	float		pen;
+	float		facePen[2];
+	Vec3		faceN[2];
+	int			faceIdx[2];
+	int			i;
+	int			j;
 
 	d = vec3_sub(b->c, a->c);
 	facePen[0] = FLT_MAX;
@@ -191,18 +264,18 @@ static int	sat_boxes(const Obb *a, const Obb *b, SatResult *res)
 	i = 0;
 	while (i < 6)
 	{
-		const Obb	*owner = (i < 3) ? a : b;
-		Vec3		n = owner->ax[i % 3];
-		float		pen;
-
-		pen = obb_radius(a, n) + obb_radius(b, n) - fabsf(vec3_dot(d, n));
+		owner = b;
+		if (i < 3)
+			owner = a;
+		n = owner->ax[i % 3];
+		pen = obb_radius(a, n) + obb_radius(b, n) - fabsf(vec3_dot(d, n));   /* [F15] -separation on a face axis */
 		if (pen < 0.0f)
 			return (0);
 		if (pen < facePen[i / 3])
 		{
 			facePen[i / 3] = pen;
 			faceIdx[i / 3] = i % 3;
-			faceN[i / 3] = (vec3_dot(d, n) < 0.0f) ? vec3_neg(n) : n;
+			faceN[i / 3] = axis_toward_b(n, d);
 		}
 		i++;
 	}
@@ -225,20 +298,17 @@ static int	sat_boxes(const Obb *a, const Obb *b, SatResult *res)
 		{
 			Vec3	cr = vec3_cross(a->ax[i], b->ax[j]);
 			float	len2 = vec3_length_sq(cr);
-			Vec3	n;
-			float	pen;
 
 			if (len2 > 0.000001f)
 			{
 				n = vec3_scale(cr, 1.0f / sqrtf(len2));
-				pen = obb_radius(a, n) + obb_radius(b, n)
-					- fabsf(vec3_dot(d, n));
+				pen = obb_radius(a, n) + obb_radius(b, n) - fabsf(vec3_dot(d, n));   /* [F15] edge-edge axis */
 				if (pen < 0.0f)
 					return (0);
 				if (pen < 0.95f * res->pen - 0.005f)
 				{
 					res->pen = pen;
-					res->n = (vec3_dot(d, n) < 0.0f) ? vec3_neg(n) : n;
+					res->n = axis_toward_b(n, d);
 					res->faceOwner = 2;
 					res->edgeA = i;
 					res->edgeB = j;
@@ -252,6 +322,7 @@ static int	sat_boxes(const Obb *a, const Obb *b, SatResult *res)
 }
 
 /* Sutherland-Hodgman: clips 'poly' in place against dot(n, x) <= off. */
+/* [F16] Sutherland-Hodgman: keeps the part of the polygon behind a plane. */
 static int	clip_plane(Vec3 *poly, int count, Vec3 n, float off)
 {
 	Vec3	outp[12];
@@ -270,8 +341,7 @@ static int	clip_plane(Vec3 *poly, int count, Vec3 n, float off)
 		if (dc <= 0.0f)
 			outp[outc++] = cur;
 		if ((dc < 0.0f && dn > 0.0f) || (dc > 0.0f && dn < 0.0f))
-			outp[outc++] = vec3_add(cur,
-					vec3_scale(vec3_sub(nxt, cur), dc / (dc - dn)));
+			outp[outc++] = vec3_add(cur, vec3_scale(vec3_sub(nxt, cur), dc / (dc - dn)));
 		i++;
 	}
 	memcpy(poly, outp, (size_t)outc * sizeof(Vec3));
@@ -281,8 +351,7 @@ static int	clip_plane(Vec3 *poly, int count, Vec3 n, float off)
 /* Builds the face manifold: takes the incident face of 'inc' (the one most
  * opposed to refN), clips it against the 4 side planes of the reference face
  * of 'ref', and keeps every clipped point below the reference face. */
-static int	face_manifold(const Obb *ref, const Obb *inc, SatResult *sat,
-				Contact *out)
+static int	face_manifold(const Obb *ref, const Obb *inc, SatResult *sat, Contact *out)
 {
 	Vec3	refN;
 	Vec3	poly[12];
@@ -290,13 +359,14 @@ static int	face_manifold(const Obb *ref, const Obb *inc, SatResult *sat,
 	int		m;
 	int		i;
 
-	refN = (sat->faceOwner == 0) ? sat->n : vec3_neg(sat->n);
+	refN = sat->n;
+	if (sat->faceOwner != 0)
+		refN = vec3_neg(sat->n);
 	m = 0;
 	i = 1;
 	while (i < 3)
 	{
-		if (fabsf(vec3_dot(inc->ax[i], refN))
-			> fabsf(vec3_dot(inc->ax[m], refN)))
+		if (fabsf(vec3_dot(inc->ax[i], refN)) > fabsf(vec3_dot(inc->ax[m], refN)))
 			m = i;
 		i++;
 	}
@@ -309,14 +379,10 @@ static int	face_manifold(const Obb *ref, const Obb *inc, SatResult *sat,
 		if (vec3_dot(f, refN) > 0.0f)
 			f = vec3_neg(f);
 		fc = vec3_add(inc->c, vec3_scale(f, inc->h[m]));
-		poly[0] = vec3_add(fc, vec3_add(vec3_scale(inc->ax[p], inc->h[p]),
-					vec3_scale(inc->ax[q], inc->h[q])));
-		poly[1] = vec3_add(fc, vec3_add(vec3_scale(inc->ax[p], -inc->h[p]),
-					vec3_scale(inc->ax[q], inc->h[q])));
-		poly[2] = vec3_add(fc, vec3_add(vec3_scale(inc->ax[p], -inc->h[p]),
-					vec3_scale(inc->ax[q], -inc->h[q])));
-		poly[3] = vec3_add(fc, vec3_add(vec3_scale(inc->ax[p], inc->h[p]),
-					vec3_scale(inc->ax[q], -inc->h[q])));
+		poly[0] = vec3_add(fc, vec3_add(vec3_scale(inc->ax[p], inc->h[p]), vec3_scale(inc->ax[q], inc->h[q])));
+		poly[1] = vec3_add(fc, vec3_add(vec3_scale(inc->ax[p], -inc->h[p]), vec3_scale(inc->ax[q], inc->h[q])));
+		poly[2] = vec3_add(fc, vec3_add(vec3_scale(inc->ax[p], -inc->h[p]), vec3_scale(inc->ax[q], -inc->h[q])));
+		poly[3] = vec3_add(fc, vec3_add(vec3_scale(inc->ax[p], inc->h[p]), vec3_scale(inc->ax[q], -inc->h[q])));
 	}
 	count = 4;
 	i = 0;
@@ -329,13 +395,13 @@ static int	face_manifold(const Obb *ref, const Obb *inc, SatResult *sat,
 
 			count = clip_plane(poly, count, u, uc + ref->h[i]);
 			if (count > 0)
-				count = clip_plane(poly, count, vec3_neg(u),
-						-(uc - ref->h[i]));
+				count = clip_plane(poly, count, vec3_neg(u), -(uc - ref->h[i]));
 		}
 		i++;
 	}
 	{
 		float	faceOff = vec3_dot(refN, ref->c) + ref->h[sat->faceIdx];
+		Contact	cand[12];
 		int		kept = 0;
 
 		i = 0;
@@ -345,16 +411,14 @@ static int	face_manifold(const Obb *ref, const Obb *inc, SatResult *sat,
 
 			if (depth < 0.0f)
 			{
-				Contact	c;
-
-				c.normal = sat->n;
-				c.point = poly[i];
-				c.penetration = -depth;
-				manifold_push(out, &kept, c);
+				cand[kept].normal = sat->n;
+				cand[kept].point = poly[i];
+				cand[kept].penetration = -depth;
+				kept++;
 			}
 			i++;
 		}
-		return (kept);
+		return (reduce_manifold(cand, kept, refN, out));
 	}
 }
 
@@ -370,8 +434,10 @@ static void	support_edge(const Obb *o, int dirIdx, Vec3 n, Vec3 *p0, Vec3 *p1)
 	{
 		if (i != dirIdx)
 		{
-			float	s = (vec3_dot(o->ax[i], n) >= 0.0f) ? 1.0f : -1.0f;
+			float	s = -1.0f;
 
+			if (vec3_dot(o->ax[i], n) >= 0.0f)
+				s = 1.0f;
 			p = vec3_add(p, vec3_scale(o->ax[i], s * o->h[i]));
 		}
 		i++;
@@ -391,8 +457,7 @@ static float	clampf(float v, float lo, float hi)
 
 /* Closest points between two segments (Ericson, Real-Time Collision
  * Detection 5.1.9, simplified: box edges never degenerate to points). */
-static void	closest_on_edges(Vec3 p1, Vec3 q1, Vec3 p2, Vec3 q2,
-				Vec3 *c1, Vec3 *c2)
+static void	closest_on_edges(Vec3 p1, Vec3 q1, Vec3 p2, Vec3 q2, Vec3 *c1, Vec3 *c2)
 {
 	Vec3	d1 = vec3_sub(q1, p1);
 	Vec3	d2 = vec3_sub(q2, p2);

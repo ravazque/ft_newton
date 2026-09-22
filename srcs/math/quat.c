@@ -43,21 +43,41 @@ Vec3	quat_rotate(Quat q, Vec3 v)
 	return (vec3_add(vec3_add(v, vec3_scale(t, q.w)), vec3_cross(u, t)));
 }
 
+/* Shortest rotation taking unit vector 'from' onto unit vector 'to'. Opposite
+ * vectors rotate 180 degrees around any perpendicular axis. */
+Quat	quat_from_to(Vec3 from, Vec3 to)
+{
+	float	d = vec3_dot(from, to);
+	Vec3	axis;
+
+	if (d >= 0.999999f)
+		return (quat_identity());
+	if (d <= -0.999999f)
+	{
+		axis = vec3_cross(vec3(1.0f, 0.0f, 0.0f), from);
+		if (vec3_length_sq(axis) < 0.000001f)
+			axis = vec3_cross(vec3(0.0f, 1.0f, 0.0f), from);
+		return (quat_from_axis_angle(vec3_normalized(axis), FTN_PI));
+	}
+	axis = vec3_cross(from, to);
+	return (quat_normalized((Quat){1.0f + d, axis.x, axis.y, axis.z}));
+}
+
 /*
- * [TODO] Integrate the orientation by the angular velocity over dt.
- *
- * This is the angular half of the semi-implicit integrator:
- *   omega = (0, angular_velocity)          // angular velocity as a pure quat
- *   dq    = 0.5 * omega * q                // derivative of the quaternion
- *   q     = q + dq * dt                    // step forward
- *   return quat_normalized(q)              // keep it a unit quaternion
- *
- * Until you implement it, orientation never changes (no rotation). The render
- * pipeline does not need this; the physics does.
+ * Angular half of the semi-implicit integrator. With the angular velocity as
+ * a pure quaternion omega = (0, w), the orientation derivative is
+ * dq/dt = 0.5 * omega * q; one explicit step is q += dq * dt, renormalized
+ * so it stays a unit quaternion.
 */
 Quat	quat_integrate(Quat q, Vec3 angular_velocity, float dt)
 {
-	(void)angular_velocity;
-	(void)dt;
-	return (q);
+	Quat	omega = {0.0f, angular_velocity.x, angular_velocity.y, angular_velocity.z};
+	Quat	dq = quat_mul(omega, q);   /* [F3] dq/dt = 0.5 (0, w) q */
+	float	half_dt = 0.5f * dt;
+
+	q.w += dq.w * half_dt;
+	q.x += dq.x * half_dt;
+	q.y += dq.y * half_dt;
+	q.z += dq.z * half_dt;
+	return (quat_normalized(q));
 }

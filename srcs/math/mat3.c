@@ -2,13 +2,12 @@
 #include "newton.h"
 
 /*
- * [TODO] 3x3 matrix math, mainly for the inertia tensor and its world-space
- * rotation I_world = R * I_local * R^T. Column-major:
- * element (col c, row r) lives at m[c * 3 + r].
- *
- * identity() and diagonal() are provided (trivial constructors). The rest are
- * placeholders that you must implement before the rotational physics works.
+ * 3x3 matrix math, mainly for the inertia tensor and its world-space rotation
+ * I_world = R * I_local * R^T. Column-major: element (col c, row r) lives at
+ * m[c * 3 + r]; the M() accessor below reads as (row, col).
 */
+
+#define M(mat, row, col) ((mat).m[(col) * 3 + (row)])
 
 Mat3	mat3_identity(void)
 {
@@ -17,6 +16,13 @@ Mat3	mat3_identity(void)
 	r.m[0] = 1.0f;
 	r.m[4] = 1.0f;
 	r.m[8] = 1.0f;
+	return (r);
+}
+
+Mat3	mat3_zero(void)
+{
+	Mat3	r = {{0}};
+
 	return (r);
 }
 
@@ -30,30 +36,95 @@ Mat3	mat3_diagonal(Vec3 d)
 	return (r);
 }
 
-Mat3	mat3_transpose(Mat3 a)
+/* Rotation matrix of a unit quaternion; same convention as mat4_from_quat. */
+Mat3	mat3_from_quat(Quat q)
 {
-	/* TODO: swap m[c*3 + r] with m[r*3 + c]. Placeholder returns the input. */
-	return (a);
+	Mat3	r;
+
+	M(r, 0, 0) = 1.0f - 2.0f * (q.y * q.y + q.z * q.z);
+	M(r, 0, 1) = 2.0f * (q.x * q.y - q.w * q.z);
+	M(r, 0, 2) = 2.0f * (q.x * q.z + q.w * q.y);
+	M(r, 1, 0) = 2.0f * (q.x * q.y + q.w * q.z);
+	M(r, 1, 1) = 1.0f - 2.0f * (q.x * q.x + q.z * q.z);
+	M(r, 1, 2) = 2.0f * (q.y * q.z - q.w * q.x);
+	M(r, 2, 0) = 2.0f * (q.x * q.z - q.w * q.y);
+	M(r, 2, 1) = 2.0f * (q.y * q.z + q.w * q.x);
+	M(r, 2, 2) = 1.0f - 2.0f * (q.x * q.x + q.y * q.y);
+	return (r);
 }
 
+Mat3	mat3_transpose(Mat3 a)
+{
+	Mat3	r;
+	int		row;
+	int		col;
+
+	row = 0;
+	while (row < 3)
+	{
+		col = 0;
+		while (col < 3)
+		{
+			M(r, row, col) = M(a, col, row);
+			col++;
+		}
+		row++;
+	}
+	return (r);
+}
+
+/* Cofactor expansion. A singular matrix (|det| ~ 0) inverts to zero, which is
+ * exactly what an immovable body needs for its inverse inertia. */
 Mat3	mat3_inverse(Mat3 a)
 {
-	/* TODO: 3x3 inverse via cofactors / determinant. Needed for the inertia
-	 * tensor. Placeholder returns the input. */
-	return (a);
+	Mat3	r = {{0}};
+	float	c00 = M(a, 1, 1) * M(a, 2, 2) - M(a, 1, 2) * M(a, 2, 1);
+	float	c01 = M(a, 1, 2) * M(a, 2, 0) - M(a, 1, 0) * M(a, 2, 2);
+	float	c02 = M(a, 1, 0) * M(a, 2, 1) - M(a, 1, 1) * M(a, 2, 0);
+	float	det = M(a, 0, 0) * c00 + M(a, 0, 1) * c01 + M(a, 0, 2) * c02;
+	float	inv;
+
+	if (fabsf(det) < 1e-12f)
+		return (r);
+	inv = 1.0f / det;
+	M(r, 0, 0) = c00 * inv;
+	M(r, 1, 0) = c01 * inv;
+	M(r, 2, 0) = c02 * inv;
+	M(r, 0, 1) = (M(a, 0, 2) * M(a, 2, 1) - M(a, 0, 1) * M(a, 2, 2)) * inv;
+	M(r, 1, 1) = (M(a, 0, 0) * M(a, 2, 2) - M(a, 0, 2) * M(a, 2, 0)) * inv;
+	M(r, 2, 1) = (M(a, 0, 1) * M(a, 2, 0) - M(a, 0, 0) * M(a, 2, 1)) * inv;
+	M(r, 0, 2) = (M(a, 0, 1) * M(a, 1, 2) - M(a, 0, 2) * M(a, 1, 1)) * inv;
+	M(r, 1, 2) = (M(a, 0, 2) * M(a, 1, 0) - M(a, 0, 0) * M(a, 1, 2)) * inv;
+	M(r, 2, 2) = (M(a, 0, 0) * M(a, 1, 1) - M(a, 0, 1) * M(a, 1, 0)) * inv;
+	return (r);
 }
 
 Mat3	mat3_mul(Mat3 a, Mat3 b)
 {
-	/* TODO: standard 3x3 * 3x3 product. Placeholder returns identity. */
-	(void)a;
-	(void)b;
-	return (mat3_identity());
+	Mat3	r;
+	int		row;
+	int		col;
+
+	row = 0;
+	while (row < 3)
+	{
+		col = 0;
+		while (col < 3)
+		{
+			M(r, row, col) = M(a, row, 0) * M(b, 0, col) + M(a, row, 1) * M(b, 1, col) + M(a, row, 2) * M(b, 2, col);
+			col++;
+		}
+		row++;
+	}
+	return (r);
 }
 
 Vec3	mat3_mul_vec3(Mat3 a, Vec3 v)
 {
-	/* TODO: 3x3 * vec3. Placeholder returns the input vector. */
-	(void)a;
-	return (v);
+	Vec3	r;
+
+	r.x = M(a, 0, 0) * v.x + M(a, 0, 1) * v.y + M(a, 0, 2) * v.z;
+	r.y = M(a, 1, 0) * v.x + M(a, 1, 1) * v.y + M(a, 1, 2) * v.z;
+	r.z = M(a, 2, 0) * v.x + M(a, 2, 1) * v.y + M(a, 2, 2) * v.z;
+	return (r);
 }

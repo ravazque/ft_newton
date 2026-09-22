@@ -1,11 +1,6 @@
 
 #include "newton.h"
 
-/*
- * Collider constructors are provided; collider_compute_inertia is [TODO]
- * (the inertia tensor that the rotational physics depends on).
-*/
-
 Collider	collider_sphere(float radius)
 {
 	Collider	c;
@@ -40,16 +35,37 @@ Collider	collider_plane(Vec3 normal, float offset)
 	return (c);
 }
 
+/*
+ * Local-space INVERSE inertia tensor. Both dynamic shapes have a
+ * diagonal tensor in their own frame:
+ *   sphere: I = 2/5 * m * r^2 on every axis
+ *   box:    I = m/12 * (H^2 + D^2, ...) with full extents = m/3 * (hy^2 + hz^2, ...)
+ * A plane never moves, so its inverse tensor is zero (like its inverse mass).
+*/
 Mat3	collider_compute_inertia(const Collider *c, float mass)
 {
-	/* TODO: local (diagonal) inverse inertia tensor per shape:
-	 *   Box:    I = 1/12 * m * (hy^2+hz^2, hx^2+hz^2, hx^2+hy^2) (full extents)
-	 *   Sphere: I = 2/5 * m * r^2 on each axis
-	 *   Plane:  zero (static, infinite mass)
-	 * Return the INVERSE tensor (mat3_inverse of the diagonal), or zero for
-	 * static shapes.
-	*/
-	(void)c;
-	(void)mass;
-	return (mat3_identity());
+	Vec3	h;
+	float	i;
+
+	if (mass <= 0.0f || c->type == SHAPE_PLANE)
+		return (mat3_zero());
+	if (c->type == SHAPE_SPHERE)
+	{
+		i = 0.4f * mass * c->radius * c->radius;   /* [F5] I = 2/5 m R^2 */
+		return (mat3_inverse(mat3_diagonal(vec3(i, i, i))));
+	}
+	h = c->halfExtents;
+	return (mat3_inverse(mat3_diagonal(vec3(mass / 3.0f * (h.y * h.y + h.z * h.z), mass / 3.0f * (h.x * h.x + h.z * h.z), mass / 3.0f * (h.x * h.x + h.y * h.y)))));   /* [F6] */
+}
+
+/* A plane is defined by normal . x = offset, independent of its body's
+ * position; these two helpers give the renderer a transform that matches. */
+Vec3	collider_plane_origin(const Collider *c)
+{
+	return (vec3_scale(c->normal, c->offset));
+}
+
+Quat	collider_plane_rotation(const Collider *c)
+{
+	return (quat_from_to(vec3(0.0f, 1.0f, 0.0f), c->normal));
 }

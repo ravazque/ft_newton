@@ -9,24 +9,19 @@ LDLIBS   = -lglfw -lGL -ldl -lpthread -lm
 
 GLADFLAGS = -g3 -O3
 
-VALGRIND = valgrind
-# VALFLAGS = --leak-check=full --show-leak-kinds=all --track-origins=yes 
-VALFLAGS = --leak-check=full --track-origins=yes 
-VALSUPP  = development/valgrind.supp
 ARGS     =
 
-# [TODO]  math/mat3, math/quat (quat_integrate), physics/*, collision/resolver
 SRCS = main.c \
-       utils/start_check.c \
+       utils/start_check.c utils/csvfile.c \
        math/vec3.c math/mat4.c math/quat.c math/mat3.c \
        render/window.c render/shader.c render/mesh.c render/camera.c \
-       render/renderer.c render/debugdraw.c \
+       render/renderer.c render/debugdraw.c render/font.c render/ui.c \
        physics/rigidbody.c physics/integrator.c physics/world.c \
        collision/collider.c collision/broadphase.c collision/narrowphase.c \
        collision/narrowphase_box.c \
        collision/resolver.c \
        game/game.c game/catapult.c game/projectile.c game/structure.c \
-       game/hud.c
+       game/hud.c game/objectdef.c game/menu.c
 
 GLAD = glad/src/gl.c
 
@@ -53,9 +48,6 @@ $(OBJDIR)/%.o: %.c
 run: all
 	./$(NAME) $(ARGS)
 
-valgrind: all
-	$(VALGRIND) $(VALFLAGS) --suppressions=$(VALSUPP) ./$(NAME) $(ARGS)
-
 clean:
 	rm -rf $(OBJDIR)
 
@@ -64,6 +56,6 @@ fclean: clean
 
 re: fclean all
 
-.PHONY: all run valgrind clean fclean re
+.PHONY: all run clean fclean re
 
 -include $(DEPS)

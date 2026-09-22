@@ -40,7 +40,7 @@ int	window_init(Window *win, int width, int height, const char *title)
 	glfwMakeContextCurrent(win->handle);
 	if (gladLoadGL(gl_loader) == 0)
 		return (fprintf(stderr, "Failed to load OpenGL via GLAD\n"), glfwDestroyWindow(win->handle), glfwTerminate(), 0);
-	glfwSwapInterval(1);
+	glfwSwapInterval(0);
 	glfwGetFramebufferSize(win->handle, &fb_w, &fb_h);
 	glViewport(0, 0, fb_w, fb_h);
 	glfwSetFramebufferSizeCallback(win->handle, framebuffer_size_callback);
@@ -69,6 +69,49 @@ void	window_poll_events(Window *win)
 void	window_swap_buffers(Window *win)
 {
 	glfwSwapBuffers(win->handle);
+}
+
+void	window_size(const Window *win, float *width, float *height)
+{
+	int	w;
+	int	h;
+
+	glfwGetFramebufferSize(win->handle, &w, &h);
+	*width = (float)w;
+	*height = (float)h;
+}
+
+/* Cursor position in the same pixel space the overlay is laid out in:
+ * origin at the top-left corner, y growing downward. */
+void	window_cursor(const Window *win, float *x, float *y)
+{
+	double	cx;
+	double	cy;
+	int		win_w;
+	int		win_h;
+	int		fb_w;
+	int		fb_h;
+
+	glfwGetCursorPos(win->handle, &cx, &cy);
+	glfwGetWindowSize(win->handle, &win_w, &win_h);
+	glfwGetFramebufferSize(win->handle, &fb_w, &fb_h);
+	*x = (float)cx;
+	*y = (float)cy;
+	if (win_w > 0 && win_h > 0)
+	{
+		*x = (float)cx * (float)fb_w / (float)win_w;
+		*y = (float)cy * (float)fb_h / (float)win_h;
+	}
+}
+
+int	window_mouse_down(const Window *win)
+{
+	return (glfwGetMouseButton(win->handle, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS);
+}
+
+int	window_key_down(const Window *win, int key)
+{
+	return (glfwGetKey(win->handle, key) == GLFW_PRESS);
 }
 
 float	window_aspect(const Window *win)

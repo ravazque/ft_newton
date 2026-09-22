@@ -3,12 +3,11 @@
 
 int	main(int argc, char *argv[])
 {
-	Game g;
+	Game	g;
 
-	if (game_init(&g, argc, argv))
-		game_run(&g);
-	else
-		return (fprintf(stderr, "Error!\n"), 1);
-	window_destroy(&g.window);
+	if (!game_init(&g, argc, argv))
+		return (1);
+	game_run(&g);
+	game_shutdown(&g);
 	return (0);
 }
