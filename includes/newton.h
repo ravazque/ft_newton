@@ -157,15 +157,17 @@ typedef struct Contact
 	float	massNormal;   /* effective masses along normal, t1, t2 */
 	float	massT1;
 	float	massT2;
-	float	massR1;       /* effective angular masses about t1, t2 */
+	float	massR1;       /* effective angular masses about t1, t2 (rolling) and the normal (spinning) */
 	float	massR2;
+	float	massRn;
 	float	bias;         /* elasticity target separating speed */
 	float	rolling;      /* rolling resistance arm of the sphere: coefficient * radius (m) */
-	float	jn;           /* accumulated impulses: normal, friction, rolling */
+	float	jn;           /* accumulated impulses: normal, friction, rolling, spinning */
 	float	jt1;
 	float	jt2;
 	float	jr1;
 	float	jr2;
+	float	jrn;
 }	Contact;
 
 /* An oriented box: center, the three world axes and the half extents. */

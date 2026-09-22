@@ -69,7 +69,7 @@ Every step, over all the contacts:
 2. **Prepare** each contact: two friction directions, the effective masses [F19], and the elasticity target [F20], read from the velocities before any impulse of the step.
 3. **Warm start**: a contact that existed last step at almost the same point (within 5 cm) starts from last step's impulses. A resting stack then converges over steps instead of being re-solved from zero every step.
 4. **Iterate** 16 times over all contacts (Gauss-Seidel). For each contact:
-   - rolling resistance, if a sphere is involved [F26];
+   - rolling resistance about the two tangent axes and the normal, if a sphere is involved [F26];
    - friction on the two tangent directions, bounded by `mu * jn` [F22];
    - the normal impulse, which only pushes [F21].
 
@@ -80,7 +80,7 @@ Every step, over all the contacts:
 ### Why the scene always comes back to rest
 
 - Slow impacts (under 1 m/s) do not bounce, so a body does not micro-bounce forever.
-- Friction removes sliding energy, and rolling resistance removes rolling energy from spheres.
+- Friction removes sliding energy, and rolling resistance removes the rolling and the spinning in place of spheres.
 - Angular damping removes the spin nothing else sees.
 - **Island sleeping** (`srcs/physics/sleep.c`): bodies linked by contacts form an island, and the island sleeps when all of its bodies have stayed below 5 cm/s and 0.05 rad/s for half a second. A pile switches off as a whole; putting its boxes to sleep one by one would pull the support from under their neighbours.
 

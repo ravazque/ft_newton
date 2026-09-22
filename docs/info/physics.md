@@ -244,11 +244,13 @@ The overlap left after the impulses is removed by moving the bodies, through the
 
 ```
 limit = c_rr * R * jn
-|jr| <= limit        (an opposing spin impulse about each tangent axis)
-1/m_r = t . Ia^-1 t + t . Ib^-1 t
+|jr| <= limit        (an opposing spin impulse about t1, t2 and n)
+1/m_r = u . Ia^-1 u + u . Ib^-1 u        (u = t1, t2 or n)
 ```
 
-A rigid ball rolling without slipping never slides, so friction alone never slows it down. A real ball and the ground deform slightly where they touch, which creates a torque against the rolling, `T = c_rr N R`. The engine applies that torque as a clamped angular impulse. The rolling ball then decelerates at `a = c_rr g / (1 + 2/5)`, about 2.1 m/s² for the apples (`c_rr = 0.3`). Boxes do not roll, so they never get this impulse: when a box tips over an edge its rotation is left untouched.
+A rigid ball rolling without slipping never slides, so friction alone never slows it down. A real ball and the ground deform slightly where they touch, which creates a torque against the rolling, `T = c_rr N R`. The engine applies that torque as a clamped angular impulse. The rolling ball then decelerates at `a = c_rr g / (1 + 2/5)`, about 2.1 m/s² for the apples (`c_rr = 0.3`).
+
+A ball spinning in place about the contact normal is the same blind spot: its contact point only turns, it never slides, so friction never sees it either. The same patch resists that spin with the same bound, about the normal axis, so the spin drops at `alpha = c_rr g / (2/5 R)`, about 14.7 rad/s² for the apples. Boxes do not roll, so they never get these impulses: when a box tips over an edge its rotation is left untouched.
 
 ## Resting
 

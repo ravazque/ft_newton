@@ -74,6 +74,7 @@ void	impulse_prepare(const World *w, Contact *c)
 	c->massT2 = effective_mass(a, b, c, c->t2);
 	c->massR1 = angular_mass(a, b, c->t1);
 	c->massR2 = angular_mass(a, b, c->t2);
+	c->massRn = angular_mass(a, b, c->normal);
 	c->rolling = fmaxf(rolling_arm(a), rolling_arm(b));									/* [F26] */
 	vn = vec3_dot(relative_velocity(a, b, c), c->normal);								/* [F18] */
 	c->bias = 0.0f;
@@ -84,6 +85,7 @@ void	impulse_prepare(const World *w, Contact *c)
 	c->jt2 = 0.0f;
 	c->jr1 = 0.0f;
 	c->jr2 = 0.0f;
+	c->jrn = 0.0f;
 }
 
 /* Equal and opposite impulses at the contact point. */
@@ -102,7 +104,8 @@ static void	solve_tangent(RigidBody *a, RigidBody *b, const Contact *c, Vec3 t, 
 	impulse_apply(a, b, c, vec3_scale(t, *accum - old));
 }
 
-/* Rolling resistance: an opposing spin impulse about a tangent axis, bounded by c_rr * r * jn. */
+/* Rolling resistance: an opposing spin impulse about a tangent axis (rolling) or the normal
+ * (spinning in place, which friction never sees), bounded by c_rr * r * jn. */
 static void	solve_rolling(RigidBody *a, RigidBody *b, Vec3 axis, float mass, float *accum, float limit)
 {
 	float	old = *accum;
@@ -127,6 +130,7 @@ void	impulse_solve(World *w, Contact *c)
 	{
 		solve_rolling(a, b, c->t1, c->massR1, &c->jr1, c->rolling * c->jn);
 		solve_rolling(a, b, c->t2, c->massR2, &c->jr2, c->rolling * c->jn);
+		solve_rolling(a, b, c->normal, c->massRn, &c->jrn, c->rolling * c->jn);
 	}
 	solve_tangent(a, b, c, c->t1, c->massT1, &c->jt1, mu * c->jn);
 	solve_tangent(a, b, c, c->t2, c->massT2, &c->jt2, mu * c->jn);

@@ -36,7 +36,7 @@ color,0.85,0.25,0.25
 | `mass` | kg. Inertia is derived from it and the shape. The ground and the trebuchet are static and have none. |
 | `friction` | Coulomb coefficient. Two surfaces use `sqrt(mu_a * mu_b)`. 0 is ice; values above 1 are allowed (very grippy). |
 | `elasticity` | Bounciness: 0 means an impact dies on contact, 1 a perfectly elastic rebound. The higher of the two bodies is used. |
-| `rolling_resistance` | Spheres only, because only they roll: the torque resisting rolling, as a share of normal force times radius. 0 rolls on forever; 0.3 stops a 5 m/s apple in about 2.5 s. |
+| `rolling_resistance` | Spheres only, because only they roll: the torque resisting rolling and spinning in place, as a share of normal force times radius. 0 rolls on forever; 0.3 stops a 5 m/s apple in about 2.5 s. |
 | `color` | RGB, each 0 to 1. |
 | `normal`, `offset` | The ground plane `normal · x = offset`. The normal is normalized on load. |
 | `extent` | Side of the ground square. It is both what is drawn and what holds bodies up: past it, bodies fall. |
