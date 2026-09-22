@@ -1,7 +1,7 @@
-
 #include "newton.h"
 
-#define HUD_REFRESH_PERIOD 0.2f
+/* The FPS and object counters, with gravity, time scale and launch settings, written to the
+ * window title so the scene itself stays clean; H hides them. */
 
 Hud	hud_default(void)
 {
@@ -14,8 +14,7 @@ Hud	hud_default(void)
 	return (h);
 }
 
-/* Exponential moving average so the FPS readout does not flicker; the title
- * is only rewritten a few times per second (window managers dislike more). */
+/* Moving average so the FPS does not flicker; the title is rewritten only a few times per second. */
 void	hud_update(Hud *h, float frame_time_seconds)
 {
 	if (frame_time_seconds <= 0.0f)
@@ -29,9 +28,7 @@ void	hud_update(Hud *h, float frame_time_seconds)
 	}
 }
 
-/* The FPS + object counters plus the live-tuned values, shown in
- * the window title so the scene itself stays clean. Hidden -> plain title. */
-void	hud_draw(Hud *h, const World *w, const Trebuchet *c, float time_scale, Window *win, int paused)
+void	hud_draw(Hud *h, const World *w, const Trebuchet *t, float time_scale, Window *win, int paused)
 {
 	char		title[192];
 	const char	*state;
@@ -49,6 +46,6 @@ void	hud_draw(Hud *h, const World *w, const Trebuchet *c, float time_scale, Wind
 	if (paused)
 		state = "  |  PAUSED";
 	n = snprintf(title, sizeof(title), WIN_TITLE "  |  FPS: %.0f  |  objects: %d  |  g: %.2f  |  time: x%.2f", (double)h->fps, w->bodyCount, (double)w->gravity.y, (double)time_scale);
-	snprintf(title + n, sizeof(title) - (size_t)n, "  |  speed: %.1f m/s  |  angle: %.0f deg  |  mass: %.2f kg%s", (double)c->launchSpeed, (double)c->launchAngle, (double)c->projectileMass, state);
+	snprintf(title + n, sizeof(title) - (size_t)n, "  |  speed: %.1f m/s  |  angle: %.0f deg  |  mass: %.2f kg%s", (double)t->launchSpeed, (double)t->launchAngle, (double)t->projectileMass, state);
 	glfwSetWindowTitle(window_handle(win), title);
 }

@@ -5,9 +5,9 @@ frame_height,4.5,,
 arm_length,5.5,,
 arm_thickness,0.28,,
 arm_angle,58,,
-counterweight_size,1.2,1.2,1.0
+counterweight_size,1.2,1.2,1
 launch_speed,11,,
 launch_angle,25,,
 friction,0.6,,
 elasticity,0.2,,
-color,0.45,0.30,0.18
+color,0.45,0.3,0.18

@@ -1,0 +1,238 @@
+# ---- fontconfig: global font cache (the big "definitely lost" blocks) ----
+{
+   newton_fontconfig
+   Memcheck:Leak
+   ...
+   obj:*/libfontconfig.so*
+}
+
+# ---- pango: text layout and metrics ----
+{
+   newton_pango
+   Memcheck:Leak
+   ...
+   obj:*/libpango-1.0.so*
+}
+{
+   newton_pangocairo
+   Memcheck:Leak
+   ...
+   obj:*/libpangocairo-1.0.so*
+}
+{
+   newton_pangoft2
+   Memcheck:Leak
+   ...
+   obj:*/libpangoft2-1.0.so*
+}
+
+# ---- GTK / GDK: window widgets and decorations ----
+{
+   newton_gtk3
+   Memcheck:Leak
+   ...
+   obj:*/libgtk-3.so*
+}
+{
+   newton_gdk3
+   Memcheck:Leak
+   ...
+   obj:*/libgdk-3.so*
+}
+{
+   newton_gdk_pixbuf
+   Memcheck:Leak
+   ...
+   obj:*/libgdk_pixbuf-2.0.so*
+}
+
+# ---- GLib / GObject / GIO: types, threads, settings, dbus ----
+{
+   newton_glib
+   Memcheck:Leak
+   ...
+   obj:*/libglib-2.0.so*
+}
+{
+   newton_gobject
+   Memcheck:Leak
+   ...
+   obj:*/libgobject-2.0.so*
+}
+{
+   newton_gio
+   Memcheck:Leak
+   ...
+   obj:*/libgio-2.0.so*
+}
+
+# ---- glycin: Rust image loader (zbus, async-io, rayon, crossbeam) ----
+# The "possibly lost" blocks from detached threads and async executors land here.
+{
+   newton_glycin
+   Memcheck:Leak
+   ...
+   obj:*/libglycin-2.so*
+}
+{
+   newton_glycin_loaders
+   Memcheck:Leak
+   ...
+   obj:*/glycin-loaders/*
+}
+{
+   newton_glycin_pixbufloader
+   Memcheck:Leak
+   ...
+   obj:*/loaders/libpixbufloader-*glycin*.so*
+}
+
+# ---- GLFW + Wayland: the window itself. The two 192 B "definitely lost"
+# blocks are wl_proxy objects from viewporter/fractional-scale that GLFW
+# creates in glfwCreateWindow and does NOT destroy (known GLFW bug on
+# Wayland). window_destroy already calls glfwDestroyWindow + glfwTerminate:
+# this is not a missing cleanup. ----
+{
+   newton_glfw
+   Memcheck:Leak
+   ...
+   obj:*/libglfw.so*
+}
+{
+   newton_wayland_client
+   Memcheck:Leak
+   ...
+   obj:*/libwayland-client.so*
+}
+{
+   newton_wayland_cursor
+   Memcheck:Leak
+   ...
+   obj:*/libwayland-cursor.so*
+}
+{
+   newton_wayland_egl
+   Memcheck:Leak
+   ...
+   obj:*/libwayland-egl.so*
+}
+
+# ---- NVIDIA / EGL / GLX driver: leaks and "still reachable" blocks owned by
+# the driver, which keeps global state until exit. Not project code. ----
+{
+   newton_nvidia
+   Memcheck:Leak
+   ...
+   obj:*/libnvidia-*.so*
+}
+# ---- NVIDIA EGL driver start-up: zero-size realloc / posix_memalign calls
+# made while the driver initialises, reported as errors, not leaks ----
+{
+   newton_nvidia_realloc_zero
+   Memcheck:ReallocZero
+   fun:realloc
+   obj:*/libnvidia-eglcore.so*
+}
+{
+   newton_nvidia_memalign_zero
+   Memcheck:BadSize
+   fun:posix_memalign
+   obj:*/libnvidia-eglcore.so*
+}
+
+# ---- Mesa (gallium): the GLSL compiler keeps its state until a clean exit ----
+{
+   newton_gallium
+   Memcheck:Leak
+   ...
+   obj:*/libgallium*.so*
+}
+{
+   newton_egl
+   Memcheck:Leak
+   ...
+   obj:*/libEGL*.so*
+}
+{
+   newton_glx
+   Memcheck:Leak
+   ...
+   obj:*/libGLX*.so*
+}
+{
+   newton_gldispatch
+   Memcheck:Leak
+   ...
+   obj:*/libGLdispatch.so*
+}
+
+# ============================================================================
+# Errors that are NOT leaks: the "Invalid read" in GTK's init (libgio, via
+# libdecor-gtk -> gtk_init -> g_settings). Same origin, not project code.
+# Silenced by error type (Addr*) + library.
+# ============================================================================
+{
+   newton_gio_invalid_read_32
+   Memcheck:Addr32
+   ...
+   obj:*/libgio-2.0.so*
+}
+{
+   newton_gio_invalid_read_16
+   Memcheck:Addr16
+   ...
+   obj:*/libgio-2.0.so*
+}
+{
+   newton_gio_invalid_read_8
+   Memcheck:Addr8
+   ...
+   obj:*/libgio-2.0.so*
+}
+
+# ============================================================================
+# Preventive: libraries libdecor-gtk also drags in that may show up in another
+# run (not present in the original trace, but they keep this file robust).
+# ============================================================================
+{
+   newton_libdecor
+   Memcheck:Leak
+   ...
+   obj:*/libdecor-*.so*
+}
+{
+   newton_cairo
+   Memcheck:Leak
+   ...
+   obj:*/libcairo.so*
+}
+{
+   newton_harfbuzz
+   Memcheck:Leak
+   ...
+   obj:*/libharfbuzz.so*
+}
+{
+   newton_fribidi
+   Memcheck:Leak
+   ...
+   obj:*/libfribidi.so*
+}
+{
+   newton_gmodule
+   Memcheck:Leak
+   ...
+   obj:*/libgmodule-2.0.so*
+}
+{
+   newton_ffi
+   Memcheck:Leak
+   ...
+   obj:*/libffi.so*
+}
+{
+   newton_dconf
+   Memcheck:Leak
+   ...
+   obj:*/libdconfsettings.so*
+}

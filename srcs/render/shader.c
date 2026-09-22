@@ -1,5 +1,6 @@
-
 #include "newton.h"
+
+/* Loads, compiles and links the GLSL program from shaders/, and sets its uniforms by name. */
 
 /* Reads a whole text file into a malloc'd, NUL-terminated buffer. */
 static char	*read_file(const char *path)
@@ -86,7 +87,6 @@ void	shader_use(const Shader *sh)
 
 void	shader_set_mat4(const Shader *sh, const char *name, Mat4 value)
 {
-	/* GL_FALSE: our matrices are already column-major, no transpose needed. */
 	glUniformMatrix4fv(glGetUniformLocation(sh->program, name), 1, GL_FALSE, value.m);
 }
 

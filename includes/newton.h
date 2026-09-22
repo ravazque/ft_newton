@@ -1,4 +1,3 @@
-
 #ifndef NEWTON_H
 # define NEWTON_H
 
@@ -18,23 +17,15 @@
 # include <GLFW/glfw3.h>
 
 /*
- * Naming convention:
- *   - Types are PascalCase:     Vec3, Mat4, RigidBody, Renderer ...
- *   - Functions are snake_case with a module prefix:
- *       vec3_add, mat4_perspective, quat_normalized, mesh_cube,
- *       window_init, renderer_draw, rb_apply_impulse, world_step ...
- *   - Small math types travel by value; stateful objects by pointer.
+ * The only header of the project: every type, then every prototype grouped by
+ * the source file that defines it (srcs/<folder>/<file>.c), in pipeline order:
+ * math -> physics -> collision -> response -> render -> menu -> data -> game.
 */
-
-/* Forward declaration so this header does not drag GLFW/GLAD into every .c.
- * Only the render .c files (and input handling) include the real GLFW headers. */
-struct GLFWwindow;
 
 /* ========================================================================== */
 /*  MATH TYPES                                                                */
 /* ========================================================================== */
 
-/* 3D vector: positions, velocities, forces, torques, normals. */
 typedef struct Vec3
 {
 	float x;
@@ -42,23 +33,19 @@ typedef struct Vec3
 	float z;
 }	Vec3;
 
-/* 3x3 matrix, column-major: element (col c, row r) lives at m[c * 3 + r].
- * Used for the inertia tensor and its world-space rotation R*I*R^T. */
+/* Column-major: element (col c, row r) lives at m[c * 3 + r]. */
 typedef struct Mat3
 {
 	float m[9];
 }	Mat3;
 
-/* 4x4 matrix, column-major: element (col c, row r) lives at m[c * 4 + r].
- * This is the layout OpenGL expects, so it uploads to a uniform with no
- * transpose. It carries the Model/View/Projection transforms. */
+/* Column-major, the layout OpenGL uploads without a transpose. */
 typedef struct Mat4
 {
 	float m[16];
 }	Mat4;
 
-/* Unit quaternion: a body's orientation, stored as (w, x, y, z). Quaternions
- * avoid gimbal lock and integrate angular velocity cheaply and stably. */
+/* Unit quaternion (w, x, y, z): an orientation without gimbal lock. */
 typedef struct Quat
 {
 	float w;
@@ -71,8 +58,6 @@ typedef struct Quat
 /*  RENDER TYPES                                                              */
 /* ========================================================================== */
 
-/* Owns the OS window + its OpenGL 3.3 Core context (created with GLFW, loaded
- * with GLAD). The window is the framebuffer the GPU draws into. */
 typedef struct Window
 {
 	struct GLFWwindow	*handle;
@@ -80,16 +65,13 @@ typedef struct Window
 	int					height;
 }	Window;
 
-/* A compiled+linked GPU program (vertex shader + fragment shader). */
 typedef struct Shader
 {
 	unsigned int	program;
 }	Shader;
 
-/* Geometry living in GPU memory. Bundles the three OpenGL objects:
- *   vbo: raw vertex data (position + normal)
- *   ebo: indices joining vertices into triangles
- *   vao: the "recipe" describing how to read the vbo */
+/* Geometry in GPU memory: vbo = vertices (position + normal), ebo = indices,
+ * vao = how the vertex shader reads the vbo. */
 typedef struct Mesh
 {
 	unsigned int	vao;
@@ -98,16 +80,14 @@ typedef struct Mesh
 	int				indexCount;
 }	Mesh;
 
-/* Produces the View and Projection matrices. A free-flying eye: it sits at
- * 'position' and looks along (yaw around Y, pitch above the horizon), so it
- * can be walked anywhere in the scene instead of circling a fixed point. */
+/* Free-flying eye: a position looking along (yaw, pitch). */
 typedef struct Camera
 {
 	Vec3	position;
 	Vec3	up;
 	float	yaw;
 	float	pitch;
-	float	moveSpeed;    /* m/s while a movement key is held */
+	float	moveSpeed;    /* m/s */
 	float	fovYDegrees;
 	float	nearPlane;
 	float	farPlane;
@@ -115,19 +95,17 @@ typedef struct Camera
 	int		win_height;
 }	Camera;
 
-/* Batched 2D overlay: every rectangle and glyph pixel of a frame goes into
- * one vertex buffer and is drawn in a single call over the 3D scene. */
+/* Batched 2D overlay: one vertex buffer, one draw call per frame. */
 typedef struct Ui
 {
 	unsigned int	vao;
 	unsigned int	vbo;
-	float			*vertices;    /* CPU side batch, UI_VERTEX_FLOATS per vertex */
+	float			*vertices;    /* UI_VERTEX_FLOATS per vertex */
 	int				vertexCount;
 	float			width;        /* window size the frame is laid out for */
 	float			height;
 }	Ui;
 
-/* Drawing front-end: hides the OpenGL state machine and owns the shader. */
 typedef struct Renderer
 {
 	Shader	shader;
@@ -139,8 +117,6 @@ typedef struct Renderer
 /*  COLLISION TYPES                                                           */
 /* ========================================================================== */
 
-/* The 3 primitive shapes. A plain enum (no virtual dispatch) keeps an
- * array of bodies compact and lets the narrow-phase switch on 'type'. */
 typedef enum ShapeType
 {
 	SHAPE_SPHERE,
@@ -148,48 +124,74 @@ typedef enum ShapeType
 	SHAPE_PLANE
 }	ShapeType;
 
-/* Shape + dimensions of a body. Only the fields relevant to 'type' are read. */
+/* Only the fields of 'type' are read. A plane is normal . x = offset, limited
+ * to a square of side 2 * halfSize centred on normal * offset. */
 typedef struct Collider
 {
 	ShapeType	type;
-	float		radius;       /* SHAPE_SPHERE                          */
-	Vec3		halfExtents;  /* SHAPE_BOX (half-size on each axis)    */
-	Vec3		normal;       /* SHAPE_PLANE orientation               */
-	float		offset;       /* SHAPE_PLANE distance along the normal */
+	float		radius;       /* sphere */
+	Vec3		halfExtents;  /* box */
+	Vec3		normal;       /* plane */
+	float		offset;       /* plane */
+	float		halfSize;     /* plane */
 }	Collider;
 
-/* A broad-phase candidate: two bodies that might overlap (indices into World). */
+/* A broad-phase candidate: two body indices, a < b. */
 typedef struct Pair
 {
 	int	a;
 	int	b;
 }	Pair;
 
-/* One contact point produced by the narrow-phase and consumed by the resolver.
- * The fields after 'penetration' are solver scratch filled every step. */
+/* One contact point. The narrow-phase fills the first five fields, the
+ * solver the rest every step. */
 typedef struct Contact
 {
 	int		a;
 	int		b;
-	Vec3	normal;       /* unit vector from A toward B           */
-	Vec3	point;        /* contact location in world space       */
-	float	penetration;  /* overlap depth along 'normal'          */
-	Vec3	t1;           /* friction directions (normal, t1, t2 orthonormal) */
+	Vec3	normal;       /* unit, from a toward b */
+	Vec3	point;        /* world space */
+	float	penetration;  /* overlap depth along the normal */
+	Vec3	t1;           /* friction directions: (normal, t1, t2) orthonormal */
 	Vec3	t2;
-	float	massNormal;   /* effective mass along the normal       */
+	float	massNormal;   /* effective masses along normal, t1, t2 */
 	float	massT1;
 	float	massT2;
-	float	bias;         /* elasticity target separating speed   */
-	float	jn;           /* accumulated impulses (normal, tangents) */
+	float	massR1;       /* effective angular masses about t1, t2 */
+	float	massR2;
+	float	bias;         /* elasticity target separating speed */
+	float	rolling;      /* rolling resistance arm of the sphere: coefficient * radius (m) */
+	float	jn;           /* accumulated impulses: normal, friction, rolling */
 	float	jt1;
 	float	jt2;
+	float	jr1;
+	float	jr2;
 }	Contact;
+
+/* An oriented box: center, the three world axes and the half extents. */
+typedef struct Obb
+{
+	Vec3	c;
+	Vec3	ax[3];
+	float	h[3];
+}	Obb;
+
+/* Axis of least penetration found by the separating axis test. */
+typedef struct SatResult
+{
+	float	pen;
+	Vec3	n;          /* unit, from A toward B */
+	int		faceOwner;  /* 0 = face of A, 1 = face of B, 2 = edge against edge */
+	int		faceIdx;
+	int		edgeA;
+	int		edgeB;
+}	SatResult;
 
 /* ========================================================================== */
 /*  PHYSICS TYPES                                                             */
 /* ========================================================================== */
 
-/* What a body was spawned as, so a reloaded definition can find its bodies. */
+/* What a body was spawned as, so a reloaded definition finds its bodies. */
 typedef enum ObjectKind
 {
 	KIND_BLOCK,
@@ -198,57 +200,51 @@ typedef enum ObjectKind
 	KIND_TREBUCHET
 }	ObjectKind;
 
-/* The core data the whole engine revolves around: an object that translates and
- * rotates but never deforms. The renderer reads position, orientation and
- * color; the simulation drives everything else. */
+/* An object that translates and rotates but never deforms. invMass == 0
+ * marks a static body (ground, trebuchet). */
 typedef struct RigidBody
 {
 	ObjectKind	kind;
-	/* linear state */
-	Vec3	position;
-	Vec3	velocity;
-	Vec3	forceAccum;
-	float	mass;
-	float	invMass;          /* 1/mass; 0 => infinite mass (static) */
-	/* angular state */
-	Quat	orientation;
-	Vec3	angularVelocity;
-	Vec3	torqueAccum;
-	Mat3	invInertiaLocal;  /* inverse inertia in body space (const) */
-	Mat3	invInertiaWorld;  /* R * invInertiaLocal * R^T, per step   */
-	/* material */
-	float	elasticity;      /* 0 = no bounce, 1 = perfectly elastic */
-	float	friction;         /* Coulomb coefficient, 0 = ice         */
-	Vec3	color;            /* render color (RGB 0..1)              */
-	/* shape */
+	Vec3		position;
+	Vec3		velocity;
+	Vec3		forceAccum;
+	float		mass;
+	float		invMass;
+	Quat		orientation;
+	Vec3		angularVelocity;
+	Vec3		torqueAccum;
+	Mat3		invInertiaLocal;    /* body space, constant */
+	Mat3		invInertiaWorld;    /* R * invInertiaLocal * R^T */
+	float		elasticity;         /* 0 = no bounce, 1 = perfectly elastic */
+	float		friction;           /* Coulomb coefficient */
+	float		rollingResistance;  /* spheres: resisting torque / (normal force * radius) */
+	Vec3		color;
 	Collider	collider;
-	/* sleeping: resting bodies stop integrating (kills jitter, saves CPU) */
-	int		awake;
-	float	sleepTimer;
+	int			awake;
+	float		sleepTimer;         /* s spent below the sleep thresholds */
 }	RigidBody;
 
-/* The simulation orchestrator. Owns every body and advances the world one fixed
- * step at a time. The pairs/contacts arrays are scratch space for collision. */
+/* Every body plus the per-step scratch of the collision pipeline. */
 typedef struct World
 {
 	RigidBody	*bodies;
 	int			bodyCount;
 	int			bodyCapacity;
-	Vec3		gravity;          /* runtime-tweakable                       */
-	Pair		*pairs;           /* broad-phase output (scratch)            */
+	Vec3		gravity;
+	Pair		*pairs;             /* broad-phase output */
 	int			pairCount;
 	int			pairCapacity;
-	Contact		*contacts;        /* narrow-phase output (scratch)           */
+	Contact		*contacts;          /* narrow-phase output */
 	int			contactCount;
 	int			contactCapacity;
-	Contact		*prevContacts;    /* last step's contacts: warm-start source  */
+	Contact		*prevContacts;      /* last step's contacts, for warm starting */
 	int			prevContactCount;
 	int			prevContactCapacity;
-	int			*islandParent;    /* per-body scratch: sleeping islands ...   */
+	int			*islandParent;      /* per-body scratch: sleep islands ... */
 	float		*islandTimer;
-	Vec3		*startPositions;  /* ... and displacement/rotation applied by  */
-	Vec3		*rotationDelta;   /*     the positional correction this step   */
-	int			scratchCapacity;  /* bodies the per-body scratch arrays hold  */
+	Vec3		*startPositions;    /* ... and what the positional correction moved */
+	Vec3		*rotationDelta;
+	int			scratchCapacity;
 	int			solverIterations;
 }	World;
 
@@ -256,15 +252,14 @@ typedef struct World
 /*  DATA FILE TYPES                                                           */
 /* ========================================================================== */
 
-/* One "property,value1,value2,value3" row of an object file: up to 3
- * numbers, or one word. */
+/* One "property,value1,value2,value3" row: up to 3 numbers, or one word. */
 typedef struct CsvEntry
 {
 	char	key[CSV_KEY_LEN];
 	char	word[CSV_KEY_LEN];
 	float	v[3];
-	int		count;            /* numeric values stored (0 when 'word' is set) */
-	int		line;             /* 1-based line in the file, for error messages */
+	int		count;  /* numbers stored (0 when 'word' is set) */
+	int		line;   /* 1-based, for error messages */
 }	CsvEntry;
 
 typedef struct CsvFile
@@ -272,22 +267,23 @@ typedef struct CsvFile
 	char		path[CSV_PATH_LEN];
 	CsvEntry	entries[CSV_MAX_ENTRIES];
 	int			count;
-	int			errors;       /* problems reported by the getters and checks */
+	int			errors;  /* problems reported by the getters and checks */
 }	CsvFile;
 
-/* Everything a spawner needs to build one kind of body, read from a .csv. */
+/* Everything needed to build one kind of body, read from its .csv. */
 typedef struct ObjectDef
 {
 	ObjectKind	kind;
 	ShapeType	shape;
-	float		radius;       /* sphere                                  */
-	Vec3		size;         /* box: full extents                       */
-	Vec3		normal;       /* plane                                   */
-	float		offset;       /* plane                                   */
-	float		extent;       /* plane: size of the drawn ground square  */
-	float		mass;         /* > 0 (planes have none and are static)   */
+	float		radius;       /* sphere */
+	Vec3		size;         /* box: full extents */
+	Vec3		normal;       /* plane */
+	float		offset;       /* plane */
+	float		extent;       /* plane: side of the ground square */
+	float		mass;         /* planes have none: they are static */
 	float		friction;
 	float		elasticity;
+	float		rollingResistance;  /* sphere */
 	Vec3		color;
 }	ObjectDef;
 
@@ -295,46 +291,42 @@ typedef struct ObjectDef
 /*  GAME TYPES                                                                */
 /* ========================================================================== */
 
-/* The launcher: five static boxes (sill, two A-frame legs, throwing arm and
- * counterweight) plus the live-tunable launch parameters (speed / angle /
- * mass) the player controls at runtime. */
+/* The launcher: five static boxes plus the live launch parameters. */
 typedef struct Trebuchet
 {
-	Vec3	position;          /* sill center on the ground                   */
-	Vec3	baseSize;          /* full extents of the sill box                */
-	float	frameHeight;       /* m: the pivot, above the ground              */
-	float	armLength;         /* m: the whole arm, both sides of the pivot   */
+	Vec3	position;           /* sill center on the ground */
+	Vec3	baseSize;           /* full extents of the sill */
+	float	frameHeight;        /* m: height of the pivot */
+	float	armLength;          /* m: both sides of the pivot */
 	float	armThickness;
-	float	armAngle;          /* degrees the throwing side sits above +X     */
-	Vec3	counterweightSize; /* full extents of the weight on the short side */
-	float	launchSpeed;       /* m/s                                         */
-	float	launchAngle;       /* degrees above +X                            */
-	float	projectileMass;    /* kg                                          */
-	float	projectileRadius;  /* m (from the apple definition)               */
+	float	armAngle;           /* deg of the throwing side above +X */
+	Vec3	counterweightSize;
+	float	launchSpeed;        /* m/s */
+	float	launchAngle;        /* deg above +X */
+	float	projectileMass;     /* kg of the next apple */
+	float	projectileRadius;   /* m */
 	float	friction;
 	float	elasticity;
 	Vec3	color;
-	Vec3	launchPoint;       /* the arm tip, where apples are released      */
-	float	spawnDistance;     /* m past the tip, the same for every angle    */
+	Vec3	launchPoint;        /* the arm tip */
+	float	spawnDistance;      /* m past the tip where apples appear */
 }	Trebuchet;
 
-/* On-screen overlay: FPS, object counter and live values. Hideable for a clean view. */
+/* FPS, object counter and live values, written to the window title. */
 typedef struct Hud
 {
 	int		visible;
 	float	fps;
 	float	refreshTimer;
-	int		refresh;          /* 1 => rewrite the title on the next draw */
+	int		refresh;  /* rewrite the title on the next draw */
 }	Hud;
 
-/* One line of the menu. The layout fills the rectangles every frame and the
- * input code hit-tests them, so mouse and keyboard drive the same rows. */
 typedef enum MenuRowKind
 {
-	MENU_SECTION,   /* a title, not selectable            */
-	MENU_VALUE,     /* a number with [-] and [+] buttons  */
-	MENU_ACTION,    /* a button that does something       */
-	MENU_HINT       /* a line of the controls panel       */
+	MENU_SECTION,
+	MENU_VALUE,
+	MENU_ACTION,
+	MENU_HINT
 }	MenuRowKind;
 
 typedef enum MenuAction
@@ -348,61 +340,57 @@ typedef enum MenuAction
 	ACTION_QUIT
 }	MenuAction;
 
+/* One line of the menu. The layout writes its rectangles every frame and the
+ * input hit-tests the same ones. */
 typedef struct MenuRow
 {
 	MenuRowKind	kind;
 	const char	*label;
-	float		*value;      /* MENU_VALUE: what [-] and [+] change */
+	float		*value;     /* MENU_VALUE: what [-] and [+] change */
 	float		min;
 	float		max;
 	float		step;
-	int			decimals;    /* digits shown after the point */
+	int			decimals;
 	MenuAction	action;
-	int			column;      /* 0 = left (values), 1 = right (controls, actions) */
-	float		x;           /* layout, recomputed every frame */
+	int			column;     /* 0 = values, 1 = controls and actions */
+	float		x;
 	float		y;
 	float		w;
 	float		h;
-	float		minusX;      /* left edge of the [-] and [+] boxes */
+	float		minusX;
 	float		plusX;
 	float		buttonW;
 }	MenuRow;
 
-/* The pause menu: every tunable value, the controls reference and the
- * actions. Opening it pauses the simulation. */
 typedef struct Menu
 {
 	int			open;
 	MenuRow		rows[MENU_MAX_ROWS];
 	int			rowCount;
-	int			selected;      /* keyboard cursor (a selectable row)  */
-	int			hoverRow;      /* row under the mouse, -1 when none   */
-	int			hoverPart;     /* -1 none, 0 minus, 1 plus, 2 button  */
-	int			heldRow;       /* row whose button is being held      */
+	int			selected;      /* keyboard cursor */
+	int			hoverRow;      /* row under the mouse, -1 when none */
+	int			hoverPart;     /* -1 none, 0 minus, 1 plus, 2 button */
+	int			heldRow;
 	int			heldPart;
 	float		repeatTimer;
-	int			valueChanged;  /* set when a value moved this frame   */
-	int			dirty;         /* edits are waiting for Apply         */
-	MenuAction	pending;       /* action clicked this frame           */
-	float		panelX;        /* geometry, recomputed by menu_layout */
+	int			valueChanged;  /* a value moved this frame */
+	int			dirty;         /* edits wait for Apply */
+	MenuAction	pending;       /* action clicked this frame */
+	float		panelX;
 	float		panelY;
 	float		panelW;
 	float		panelH;
-	float		scale;         /* font pixel size (a whole number)    */
-	float		line;          /* height of one row                   */
+	float		scale;         /* screen pixels per font pixel */
+	float		line;          /* height of one row */
 	float		pad;
 }	Menu;
 
-/* The debug display: draws colliders as wireframe, toggleable live. */
 typedef struct DebugDraw
 {
 	int	enabled;
 }	DebugDraw;
 
-/* What the menu edits. It is a copy, never the running simulation: the rows
- * move these numbers and nothing happens until Apply pushes them across (or
- * Save writes them to the files). That way a value can be dialled in without
- * the scene reacting halfway through. */
+/* What the menu edits: a copy of the simulation values, committed by Apply. */
 typedef struct Draft
 {
 	ObjectDef	apple;
@@ -413,7 +401,6 @@ typedef struct Draft
 	float		timeScale;
 }	Draft;
 
-/* Top-level application: wires every module together and runs the main loop. */
 typedef struct Game
 {
 	Window		window;
@@ -424,155 +411,93 @@ typedef struct Game
 	Camera		camera;
 	DebugDraw	debug;
 	Hud			hud;
-	Trebuchet	trebuchet;     /* the live one: launch settings change with the keys */
-	Trebuchet	trebuchetDef;  /* what a reset goes back to                        */
+	Trebuchet	trebuchet;     /* live: the keys change its launch settings */
+	Trebuchet	trebuchetDef;  /* what a reset returns to */
 	ObjectDef	appleDef;
 	ObjectDef	blockDef;
 	ObjectDef	groundDef;
-	Draft		draft;         /* the menu's working copy, committed by Apply      */
+	Draft		draft;
 	float		fixedDt;
-	float		timeScale;   /* runtime control over "time" */
-	int			paused;      /* set by P, or while the menu is open */
-	int			quit;        /* the menu's Quit button */
+	float		timeScale;
+	int			paused;
+	int			quit;
 	Mesh		cubeMesh;
 	Mesh		sphereMesh;
 	Mesh		planeMesh;
 }	Game;
 
 /* ========================================================================== */
-/*  MATH FUNCTIONS                                                            */
+/*  srcs/math                                                                 */
 /* ========================================================================== */
 
-/* ---- Vec3 ---- */
-Vec3	vec3(float x, float y, float z);
-Vec3	vec3_add(Vec3 a, Vec3 b);
-Vec3	vec3_sub(Vec3 a, Vec3 b);
-Vec3	vec3_neg(Vec3 a);
-Vec3	vec3_scale(Vec3 a, float s);
-float	vec3_dot(Vec3 a, Vec3 b);
-Vec3	vec3_cross(Vec3 a, Vec3 b);
-float	vec3_length(Vec3 a);
-float	vec3_length_sq(Vec3 a);
-Vec3	vec3_normalized(Vec3 a);
+/* ---- vec3.c ---- */
+Vec3		vec3(float x, float y, float z);
+Vec3		vec3_add(Vec3 a, Vec3 b);
+Vec3		vec3_sub(Vec3 a, Vec3 b);
+Vec3		vec3_neg(Vec3 a);
+Vec3		vec3_scale(Vec3 a, float s);
+float		vec3_dot(Vec3 a, Vec3 b);
+Vec3		vec3_cross(Vec3 a, Vec3 b);
+float		vec3_length(Vec3 a);
+float		vec3_length_sq(Vec3 a);
+Vec3		vec3_normalized(Vec3 a);
 
-/* ---- Mat4 ---- */
-Mat4	mat4_identity(void);
-Mat4	mat4_translation(Vec3 t);
-Mat4	mat4_scale(Vec3 s);
-Mat4	mat4_from_quat(Quat q);
-Mat4	mat4_transform(Vec3 pos, Quat rot, Vec3 scale);
-Mat4	mat4_perspective(float fovy_radians, float aspect, float near_p, float far_p);
-Mat4	mat4_look_at(Vec3 eye, Vec3 target, Vec3 up);
-Mat4	mat4_mul(Mat4 a, Mat4 b);
+/* ---- scalar.c ---- */
+float		clampf(float v, float lo, float hi);
 
-/* ---- Quat ---- */
-Quat	quat_identity(void);
-Quat	quat_from_axis_angle(Vec3 axis, float radians);
-Quat	quat_from_to(Vec3 from, Vec3 to);
-Quat	quat_mul(Quat a, Quat b);
-Quat	quat_normalized(Quat q);
-Vec3	quat_rotate(Quat q, Vec3 v);
-Quat	quat_integrate(Quat q, Vec3 angular_velocity, float dt);
+/* ---- mat3.c ---- */
+Mat3		mat3_identity(void);
+Mat3		mat3_zero(void);
+Mat3		mat3_diagonal(Vec3 d);
+Mat3		mat3_from_quat(Quat q);
+Mat3		mat3_transpose(Mat3 a);
+Mat3		mat3_inverse(Mat3 a);
+Mat3		mat3_mul(Mat3 a, Mat3 b);
+Vec3		mat3_mul_vec3(Mat3 a, Vec3 v);
 
-/* ---- Mat3 ---- */
-Mat3	mat3_identity(void);
-Mat3	mat3_zero(void);
-Mat3	mat3_diagonal(Vec3 d);
-Mat3	mat3_from_quat(Quat q);
-Mat3	mat3_transpose(Mat3 a);
-Mat3	mat3_inverse(Mat3 a);
-Mat3	mat3_mul(Mat3 a, Mat3 b);
-Vec3	mat3_mul_vec3(Mat3 a, Vec3 v);
+/* ---- mat4.c ---- */
+Mat4		mat4_identity(void);
+Mat4		mat4_translation(Vec3 t);
+Mat4		mat4_scale(Vec3 s);
+Mat4		mat4_from_quat(Quat q);
+Mat4		mat4_transform(Vec3 pos, Quat rot, Vec3 scale);
+Mat4		mat4_perspective(float fovy_radians, float aspect, float near_p, float far_p);
+Mat4		mat4_look_at(Vec3 eye, Vec3 target, Vec3 up);
+Mat4		mat4_mul(Mat4 a, Mat4 b);
 
-/* ========================================================================== */
-/*  RENDER FUNCTIONS                                                          */
-/* ========================================================================== */
-
-/* ---- Window ---- */
-int		window_init(Window *win, int width, int height, const char *title);
-void	window_destroy(Window *win);
-int		window_should_close(const Window *win);
-void	window_poll_events(Window *win);
-void	window_swap_buffers(Window *win);
-float	window_aspect(const Window *win);
-void	window_size(const Window *win, float *width, float *height);
-void	window_cursor(const Window *win, float *x, float *y);
-int		window_mouse_down(const Window *win);
-int		window_key_down(const Window *win, int key);
-struct GLFWwindow	*window_handle(const Window *win);
-
-/* ---- Shader ---- */
-int		shader_load(Shader *sh, const char *vert_path, const char *frag_path);
-void	shader_use(const Shader *sh);
-void	shader_set_mat4(const Shader *sh, const char *name, Mat4 value);
-void	shader_set_vec3(const Shader *sh, const char *name, Vec3 value);
-void	shader_set_float(const Shader *sh, const char *name, float value);
-void	shader_set_int(const Shader *sh, const char *name, int value);
-
-/* ---- Mesh ---- */
-Mesh	mesh_cube(void);
-Mesh	mesh_sphere(int segments);
-Mesh	mesh_plane(float size);
-void	mesh_draw(const Mesh *mesh);
-void	mesh_release(Mesh *mesh);
-
-/* ---- Camera ---- */
-Camera	camera_default(void);
-void	camera_look(Camera *cam, float delta_yaw, float delta_pitch);
-void	camera_move(Camera *cam, Vec3 local_delta);
-void	camera_change_speed(Camera *cam, float delta);
-Mat4	camera_view(const Camera *cam);
-Mat4	camera_projection(const Camera *cam, float aspect);
-
-/* ---- Bitmap font ---- */
-const unsigned char	*font_glyph(char c);
-
-/* ---- 2D overlay ---- */
-int		ui_init(Ui *ui);
-void	ui_destroy(Ui *ui);
-void	ui_begin(Ui *ui, float width, float height);
-void	ui_rect(Ui *ui, float x, float y, float w, float h, Vec3 color);
-void	ui_border(Ui *ui, float x, float y, float w, float h, float t, Vec3 color);
-void	ui_text(Ui *ui, const char *text, float x, float y, float scale, Vec3 color);
-void	ui_text_right(Ui *ui, const char *text, float right, float y, float scale, Vec3 color);
-float	ui_text_width(const char *text, float scale);
-void	ui_end(Ui *ui, Renderer *r);
-
-/* ---- Menu ---- */
-void	menu_add_section(Menu *m, const char *label, int column);
-void	menu_add_value(Menu *m, const char *label, float *value, float min_value, float max_value, float step, int decimals);
-void	menu_add_action(Menu *m, const char *label, MenuAction action, int column);
-void	menu_add_hint(Menu *m, const char *label);
-void	menu_layout(Menu *m, float width, float height);
-void	menu_update(Menu *m, Window *win, float frame_time);
-void	menu_draw(const Menu *m, Ui *ui);
-
-/* ---- Renderer ---- */
-int		renderer_init(Renderer *r);
-void	renderer_begin_frame(Renderer *r, const Camera *cam, float aspect);
-void	renderer_draw(Renderer *r, const Mesh *mesh, Mat4 model, Vec3 color);
-void	renderer_draw_flat(Renderer *r, const Mesh *mesh, Mat4 model, Vec3 color);
-void	renderer_set_wireframe(Renderer *r, int on);
+/* ---- quat.c ---- */
+Quat		quat_identity(void);
+Quat		quat_from_axis_angle(Vec3 axis, float radians);
+Quat		quat_from_to(Vec3 from, Vec3 to);
+Quat		quat_mul(Quat a, Quat b);
+Quat		quat_normalized(Quat q);
+Quat		quat_conjugate(Quat q);
+Vec3		quat_rotate(Quat q, Vec3 v);
+Quat		quat_integrate(Quat q, Vec3 angular_velocity, float dt);
 
 /* ========================================================================== */
-/*  PHYSICS FUNCTIONS                                                         */
+/*  srcs/physics                                                              */
 /* ========================================================================== */
 
-/* ---- RigidBody ---- */
+/* ---- rigidbody.c ---- */
 RigidBody	rb_make(void);
 void		rb_set_mass(RigidBody *b, float mass);
 void		rb_make_static(RigidBody *b);
-void		rb_update_inertia_world(RigidBody *b);
 void		rb_apply_force(RigidBody *b, Vec3 force);
 void		rb_apply_force_at_point(RigidBody *b, Vec3 force, Vec3 world_point);
 void		rb_apply_impulse(RigidBody *b, Vec3 impulse);
 void		rb_apply_impulse_at_point(RigidBody *b, Vec3 impulse, Vec3 world_point);
+void		rb_apply_angular_impulse(RigidBody *b, Vec3 angular_impulse);
 void		rb_clear_accumulators(RigidBody *b);
 
-/* ---- Integrator ---- */
+/* ---- inertia.c ---- */
+Mat3		inertia_local_inverse(const Collider *c, float mass);
+void		inertia_update_world(RigidBody *b);
+
+/* ---- integrator.c ---- */
 void		integrator_integrate(RigidBody *b, Vec3 gravity, float dt);
 
-/* ---- World ---- */
+/* ---- world.c ---- */
 void		world_init(World *w);
 void		world_destroy(World *w);
 int			world_add_body(World *w, RigidBody body);
@@ -582,40 +507,171 @@ void		world_wake_all(World *w);
 int			world_grow_scratch(World *w);
 void		world_step(World *w, float dt);
 
-/* ---- Collision pipeline ----
- * world_step runs broadphase (candidate pairs) -> narrowphase (contacts with
- * normal / point / penetration) -> resolver (impulses + positional correction). */
-void		broadphase_compute_pairs(World *w);
-void		narrowphase_generate_contacts(World *w);
-void		resolver_resolve(World *w);
+/* ---- sleep.c ---- */
+void		sleep_update(World *w, float dt);
 
-/* ---- Per-pair contact generators (used by the narrow-phase) ----
- * Each writes up to MAX_CONTACTS_PER_PAIR contacts into 'out' (indices a/b
- * left unset) and returns how many it found. The normal always points from
- * the FIRST argument's body toward the SECOND's. */
-int			contact_sphere_sphere(const RigidBody *a, const RigidBody *b, Contact *out);
-int			contact_sphere_plane(const RigidBody *sphere, const RigidBody *plane, Contact *out);
-int			contact_box_plane(const RigidBody *box, const RigidBody *plane, Contact *out);
-int			contact_sphere_box(const RigidBody *sphere, const RigidBody *box, Contact *out);
-int			contact_box_box(const RigidBody *a, const RigidBody *b, Contact *out);
+/* ---- cull.c ---- */
+void		cull_lost_bodies(World *w);
 
-/* ---- Contact query: "are these two bodies touching?" -> 1 / 0 ---- */
-int			bodies_in_contact(const RigidBody *a, const RigidBody *b);
+/* ========================================================================== */
+/*  srcs/collision                                                            */
+/* ========================================================================== */
 
-/* ---- Collider ---- */
+/* ---- collider.c ---- */
 Collider	collider_sphere(float radius);
 Collider	collider_box(Vec3 half_extents);
-Collider	collider_plane(Vec3 normal, float offset);
-Mat3		collider_compute_inertia(const Collider *c, float mass);
+Collider	collider_plane(Vec3 normal, float offset, float size);
 Vec3		collider_plane_origin(const Collider *c);
 Quat		collider_plane_rotation(const Collider *c);
+float		collider_plane_distance(const Collider *c, Vec3 point);
+int			collider_plane_covers(const Collider *c, Vec3 point);
+void		collider_bounds(const RigidBody *b, Vec3 *mn, Vec3 *mx);
+
+/* ---- broadphase.c ---- */
+void		broadphase_compute_pairs(World *w);
+
+/* ---- narrowphase.c ---- */
+void		narrowphase_generate_contacts(World *w);
+int			narrowphase_pair(const RigidBody *a, const RigidBody *b, Contact *out);
+
+/* ---- query.c ---- */
+int			bodies_in_contact(const RigidBody *a, const RigidBody *b);
+int			bodies_overlap(const RigidBody *a, const RigidBody *b);
+int			world_first_overlap(const World *w, const RigidBody *candidate);
+
+/* ---- contact_sphere.c / contact_box.c: each writes up to
+ * MAX_CONTACTS_PER_PAIR contacts, normal from the FIRST body toward the
+ * SECOND, and returns how many ---- */
+int			contact_sphere_sphere(const RigidBody *a, const RigidBody *b, Contact *out);
+int			contact_sphere_plane(const RigidBody *sphere, const RigidBody *plane, Contact *out);
+int			contact_sphere_box(const RigidBody *sphere, const RigidBody *box, Contact *out);
+int			contact_box_plane(const RigidBody *box, const RigidBody *plane, Contact *out);
+int			contact_box_box(const RigidBody *a, const RigidBody *b, Contact *out);
+
+/* ---- obb.c ---- */
+Obb			obb_from_body(const RigidBody *b);
+float		obb_radius(const Obb *o, Vec3 n);
+Vec3		obb_corner(const Obb *o, int i);
+void		obb_support_edge(const Obb *o, int dir_idx, Vec3 n, Vec3 *p0, Vec3 *p1);
+
+/* ---- sat.c ---- */
+int			sat_boxes(const Obb *a, const Obb *b, SatResult *res);
+
+/* ---- manifold.c ---- */
+int			manifold_reduce(const Contact *cand, int n, Vec3 axis, Contact *out);
+int			manifold_clip(Vec3 *poly, int count, Vec3 n, float off);
 
 /* ========================================================================== */
-/*  DATA FILE FUNCTIONS                                                       */
+/*  srcs/response                                                             */
 /* ========================================================================== */
 
-/* ---- CsvFile: strict "property,value1,value2,value3" object files ---- */
+/* ---- resolver.c ---- */
+void		resolver_resolve(World *w);
+
+/* ---- impulse.c ---- */
+void		impulse_prepare(const World *w, Contact *c);
+void		impulse_apply(RigidBody *a, RigidBody *b, const Contact *c, Vec3 impulse);
+void		impulse_solve(World *w, Contact *c);
+
+/* ---- correction.c ---- */
+void		correction_apply(World *w);
+
+/* ========================================================================== */
+/*  srcs/render                                                               */
+/* ========================================================================== */
+
+/* ---- window.c ---- */
+int			window_init(Window *win, int width, int height, const char *title);
+void		window_destroy(Window *win);
+int			window_should_close(const Window *win);
+void		window_poll_events(Window *win);
+void		window_swap_buffers(Window *win);
+float		window_aspect(const Window *win);
+void		window_size(const Window *win, float *width, float *height);
+void		window_cursor(const Window *win, float *x, float *y);
+int			window_mouse_down(const Window *win);
+int			window_key_down(const Window *win, int key);
+struct GLFWwindow	*window_handle(const Window *win);
+
+/* ---- shader.c ---- */
+int			shader_load(Shader *sh, const char *vert_path, const char *frag_path);
+void		shader_use(const Shader *sh);
+void		shader_set_mat4(const Shader *sh, const char *name, Mat4 value);
+void		shader_set_vec3(const Shader *sh, const char *name, Vec3 value);
+void		shader_set_float(const Shader *sh, const char *name, float value);
+void		shader_set_int(const Shader *sh, const char *name, int value);
+
+/* ---- mesh.c ---- */
+Mesh		mesh_cube(void);
+Mesh		mesh_sphere(int segments);
+Mesh		mesh_plane(void);
+void		mesh_draw(const Mesh *mesh);
+void		mesh_release(Mesh *mesh);
+
+/* ---- camera.c ---- */
+Camera		camera_default(void);
+void		camera_look(Camera *cam, float delta_yaw, float delta_pitch);
+void		camera_move(Camera *cam, Vec3 local_delta);
+void		camera_change_speed(Camera *cam, float delta);
+Mat4		camera_view(const Camera *cam);
+Mat4		camera_projection(const Camera *cam, float aspect);
+
+/* ---- renderer.c ---- */
+int			renderer_init(Renderer *r);
+void		renderer_begin_frame(Renderer *r, const Camera *cam, float aspect);
+void		renderer_draw(Renderer *r, const Mesh *mesh, Mat4 model, Vec3 color);
+void		renderer_draw_flat(Renderer *r, const Mesh *mesh, Mat4 model, Vec3 color);
+void		renderer_set_wireframe(Renderer *r, int on);
+Mat4		renderer_body_model(const RigidBody *b, float inflate);
+const Mesh	*renderer_body_mesh(const RigidBody *b, const Mesh *cube, const Mesh *sphere, const Mesh *plane);
+
+/* ---- debugdraw.c ---- */
+void		debugdraw_draw_colliders(const DebugDraw *d, const World *w, Renderer *r, const Mesh *cube, const Mesh *sphere, const Mesh *plane);
+
+/* ---- font.c ---- */
+const unsigned char	*font_glyph(char c);
+
+/* ---- ui.c ---- */
+int			ui_init(Ui *ui);
+void		ui_destroy(Ui *ui);
+void		ui_begin(Ui *ui, float width, float height);
+void		ui_rect(Ui *ui, float x, float y, float w, float h, Vec3 color);
+void		ui_border(Ui *ui, float x, float y, float w, float h, float t, Vec3 color);
+void		ui_text(Ui *ui, const char *text, float x, float y, float scale, Vec3 color);
+void		ui_text_right(Ui *ui, const char *text, float right, float y, float scale, Vec3 color);
+float		ui_text_width(const char *text, float scale);
+void		ui_end(Ui *ui, Renderer *r);
+
+/* ========================================================================== */
+/*  srcs/menu                                                                 */
+/* ========================================================================== */
+
+/* ---- menu.c ---- */
+void		menu_add_section(Menu *m, const char *label, int column);
+void		menu_add_value(Menu *m, const char *label, float *value, float min_value, float max_value, float step, int decimals);
+void		menu_add_action(Menu *m, const char *label, MenuAction action, int column);
+void		menu_add_hint(Menu *m, const char *label);
+int			menu_is_selectable(const MenuRow *row);
+void		menu_step_value(Menu *m, MenuRow *row, int direction);
+
+/* ---- menu_layout.c ---- */
+void		menu_layout(Menu *m, float width, float height);
+
+/* ---- menu_input.c ---- */
+void		menu_update(Menu *m, Window *win, float frame_time);
+
+/* ---- menu_draw.c ---- */
+void		menu_draw(const Menu *m, Ui *ui);
+
+/* ========================================================================== */
+/*  srcs/data                                                                 */
+/* ========================================================================== */
+
+/* ---- csvfile.c ---- */
 int			csv_load(CsvFile *c, const char *path);
+const CsvEntry	*csv_find(const CsvFile *c, const char *key);
+
+/* ---- csv_values.c ---- */
 int			csv_reject_unknown(CsvFile *c, const char **allowed, int allowed_count);
 float		csv_get_float(CsvFile *c, const char *key);
 Vec3		csv_get_vec3(CsvFile *c, const char *key);
@@ -627,56 +683,72 @@ int			csv_expect_range(CsvFile *c, const char *key, float v, float lo, float hi)
 int			csv_expect_positive_vec3(CsvFile *c, const char *key, Vec3 v);
 int			csv_expect_range_vec3(CsvFile *c, const char *key, Vec3 v, float lo, float hi);
 
-/* ---- ObjectDef ---- */
+/* ---- objectdef.c ---- */
 int			objectdef_load(ObjectDef *def, const char *path, ObjectKind kind);
 RigidBody	objectdef_make_body(const ObjectDef *def, Vec3 position);
 int			objectdef_save(const ObjectDef *def, const char *path);
 
+/* ---- trebuchet_file.c ---- */
+int			trebuchet_load(Trebuchet *t, const char *path, const ObjectDef *apple);
+int			trebuchet_save(const Trebuchet *t, const char *path);
+
 /* ========================================================================== */
-/*  GAME FUNCTIONS                                                            */
+/*  srcs/game                                                                 */
 /* ========================================================================== */
 
-/* ---- Trebuchet ---- */
-int			trebuchet_load(Trebuchet *c, const char *path, const ObjectDef *apple);
-int			trebuchet_save(const Trebuchet *c, const char *path);
-void		trebuchet_build(Trebuchet *c, World *w);
-Vec3		trebuchet_direction(const Trebuchet *c);
-Vec3		trebuchet_spawn_point(const Trebuchet *c);
-int			trebuchet_fire(const Trebuchet *c, const ObjectDef *apple, World *w);
-
-/* ---- Projectile (the apple) ---- */
-RigidBody	projectile_make_apple(const ObjectDef *apple, Vec3 position, Vec3 velocity, float mass);
-
-/* ---- Structure (walls / towers / pyramids of blocks) ---- */
-void		structure_spawn_wall(World *w, const ObjectDef *block, Vec3 origin, int columns, int rows);
-void		structure_spawn_pyramid(World *w, const ObjectDef *block, Vec3 origin, int base_count);
-void		structure_spawn_tower(World *w, const ObjectDef *block, Vec3 origin, int height);
-
-/* ---- Hud ---- */
-Hud			hud_default(void);
-void		hud_update(Hud *h, float frame_time_seconds);
-void		hud_draw(Hud *h, const World *w, const Trebuchet *c, float time_scale, Window *win, int paused);
-
-/* ---- DebugDraw ---- */
-void		debugdraw_draw_colliders(const DebugDraw *d, const World *w, Renderer *r, const Mesh *cube, const Mesh *sphere, const Mesh *plane);
-
-/* ---- Game: start-up, the frame and the loop (srcs/game/game.c) ---- */
+/* ---- game.c ---- */
 int			game_init(Game *g, int argc, char **argv);
 void		game_run(Game *g);
 void		game_shutdown(Game *g);
 
-/* ---- Scene: what is in the world, and what the menu does to it (scene.c) ---- */
-int			scene_load_assets(Game *g);
-void		scene_build(Game *g);
-void		scene_build_menu(Game *g);
-void		scene_sync_draft(Game *g);
-void		scene_apply_definitions(Game *g);
-void		scene_run_action(Game *g, MenuAction action);
+/* ---- draw.c ---- */
+void		draw_frame(Game *g);
 
-/* ---- Input: every key the game reads (srcs/game/input.c) ---- */
+/* ---- input.c ---- */
 void		input_poll(Game *g, float frame_time);
 
-/* ---- Utils ---- */
+/* ---- hud.c ---- */
+Hud			hud_default(void);
+void		hud_update(Hud *h, float frame_time_seconds);
+void		hud_draw(Hud *h, const World *w, const Trebuchet *t, float time_scale, Window *win, int paused);
+
+/* ---- scene.c ---- */
+int			scene_load_assets(Game *g);
+int			scene_check_start(const ObjectDef *ground, const ObjectDef *block, const Trebuchet *trebuchet);
+void		scene_build(Game *g);
+void		scene_apply_definitions(Game *g);
+
+/* ---- actions.c ---- */
+void		action_sync_draft(Game *g);
+void		action_run(Game *g, MenuAction action);
+
+/* ---- menu_rows.c ---- */
+void		menu_rows_build(Game *g);
+
+/* ---- trebuchet.c ---- */
+void		trebuchet_parts(const Trebuchet *t, Vec3 *center, Vec3 *half, Quat *rotation);
+Vec3		trebuchet_launch_point(const Trebuchet *t);
+Vec3		trebuchet_direction(const Trebuchet *t);
+Vec3		trebuchet_spawn_point(const Trebuchet *t);
+void		trebuchet_build(Trebuchet *t, World *w);
+int			trebuchet_fire(const Trebuchet *t, const ObjectDef *apple, World *w);
+
+/* ---- trebuchet_clearance.c ---- */
+float		trebuchet_spawn_distance(const Trebuchet *t);
+
+/* ---- projectile.c ---- */
+RigidBody	projectile_make_apple(const ObjectDef *apple, Vec3 position, Vec3 velocity, float mass);
+
+/* ---- structure.c ---- */
+float		structure_spawn_wall(World *w, const ObjectDef *block, Vec3 origin, int columns, int rows);
+float		structure_spawn_pyramid(World *w, const ObjectDef *block, Vec3 origin, int base_count);
+float		structure_spawn_tower(World *w, const ObjectDef *block, Vec3 origin, int height);
+
+/* ========================================================================== */
+/*  srcs/utils                                                                */
+/* ========================================================================== */
+
+/* ---- start_check.c ---- */
 void		check_input(int argc, char **argv, Camera *camera);
 
 #endif

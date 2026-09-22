@@ -1,11 +1,6 @@
-
 #include "newton.h"
 
-/*
- * 3x3 matrix math, mainly for the inertia tensor and its world-space rotation
- * I_world = R * I_local * R^T. Column-major: element (col c, row r) lives at
- * m[c * 3 + r]; the M() accessor below reads as (row, col).
-*/
+/* 3x3 matrices for the inertia tensor (I_world = R I_local R^T). Column-major; M() reads as (row, col). */
 
 #define M(mat, row, col) ((mat).m[(col) * 3 + (row)])
 
@@ -36,7 +31,6 @@ Mat3	mat3_diagonal(Vec3 d)
 	return (r);
 }
 
-/* Rotation matrix of a unit quaternion; same convention as mat4_from_quat. */
 Mat3	mat3_from_quat(Quat q)
 {
 	Mat3	r;
@@ -73,8 +67,7 @@ Mat3	mat3_transpose(Mat3 a)
 	return (r);
 }
 
-/* Cofactor expansion. A singular matrix (|det| ~ 0) inverts to zero, which is
- * exactly what an immovable body needs for its inverse inertia. */
+/* Cofactor expansion; a singular matrix inverts to zero, which is what a static body needs. */
 Mat3	mat3_inverse(Mat3 a)
 {
 	Mat3	r = {{0}};

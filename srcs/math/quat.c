@@ -1,5 +1,7 @@
-
 #include "newton.h"
+
+/* Unit quaternions: body orientations, their rotation of vectors and their integration from an
+ * angular velocity [F3]. */
 
 Quat	quat_identity(void)
 {
@@ -35,6 +37,12 @@ Quat	quat_normalized(Quat q)
 	return ((Quat){q.w * inv, q.x * inv, q.y * inv, q.z * inv});
 }
 
+/* Inverse rotation of a unit quaternion. */
+Quat	quat_conjugate(Quat q)
+{
+	return ((Quat){q.w, -q.x, -q.y, -q.z});
+}
+
 Vec3	quat_rotate(Quat q, Vec3 v)
 {
 	Vec3	u = vec3(q.x, q.y, q.z);
@@ -43,8 +51,8 @@ Vec3	quat_rotate(Quat q, Vec3 v)
 	return (vec3_add(vec3_add(v, vec3_scale(t, q.w)), vec3_cross(u, t)));
 }
 
-/* Shortest rotation taking unit vector 'from' onto unit vector 'to'. Opposite
- * vectors rotate 180 degrees around any perpendicular axis. */
+/* Shortest rotation taking unit vector 'from' onto 'to'; opposite vectors turn 180 degrees
+ * about any perpendicular axis. */
 Quat	quat_from_to(Vec3 from, Vec3 to)
 {
 	float	d = vec3_dot(from, to);
@@ -63,12 +71,7 @@ Quat	quat_from_to(Vec3 from, Vec3 to)
 	return (quat_normalized((Quat){1.0f + d, axis.x, axis.y, axis.z}));
 }
 
-/*
- * Angular half of the semi-implicit integrator. With the angular velocity as
- * a pure quaternion omega = (0, w), the orientation derivative is
- * dq/dt = 0.5 * omega * q; one explicit step is q += dq * dt, renormalized
- * so it stays a unit quaternion.
-*/
+/* dq/dt = 0.5 (0, w) q, one step then renormalized so q stays a unit quaternion. */
 Quat	quat_integrate(Quat q, Vec3 angular_velocity, float dt)
 {
 	Quat	omega = {0.0f, angular_velocity.x, angular_velocity.y, angular_velocity.z};

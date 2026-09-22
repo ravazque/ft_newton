@@ -1,5 +1,7 @@
-
 #include "newton.h"
+
+/* The OS window and its OpenGL 3.3 Core context (GLFW creates it, GLAD loads the GL
+ * functions), plus raw input queries. */
 
 static void	framebuffer_size_callback(struct GLFWwindow *win, int width, int height)
 {
@@ -12,9 +14,7 @@ static void	glfw_error_callback(int code, const char *description)
 	fprintf(stderr, "GLFW error %d: %s\n", code, description);
 }
 
-/* GLAD expects a loader returning GLADapiproc (a function pointer). Matching
- * the signature exactly avoids a cast that -Werror would reject. GLFW's
- * GLFWglproc and GLAD's GLADapiproc are both void(*)(void), so this is clean. */
+/* Same signature as GLADapiproc, so no function pointer cast is needed. */
 static GLADapiproc	gl_loader(const char *name)
 {
 	return (glfwGetProcAddress(name));
@@ -81,8 +81,7 @@ void	window_size(const Window *win, float *width, float *height)
 	*height = (float)h;
 }
 
-/* Cursor position in the same pixel space the overlay is laid out in:
- * origin at the top-left corner, y growing downward. */
+/* Cursor in framebuffer pixels (top-left origin), the space the overlay is laid out in. */
 void	window_cursor(const Window *win, float *x, float *y)
 {
 	double	cx;

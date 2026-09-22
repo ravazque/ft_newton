@@ -1,7 +1,7 @@
 # property,value1,value2,value3
 shape,box,,
-size,1.0,1.0,1.0
-mass,1.0,,
+size,1,1,1
+mass,1,,
 friction,0.6,,
 elasticity,0.2,,
-color,0.40,0.60,0.90
+color,0.4,0.6,0.9

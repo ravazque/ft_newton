@@ -1,5 +1,7 @@
-
 #include "newton.h"
+
+/* Draw calls of the 3D scene: per-frame camera matrices, then one model matrix, color and
+ * lighting mode per mesh. */
 
 int	renderer_init(Renderer *r)
 {
@@ -31,8 +33,7 @@ void	renderer_draw(Renderer *r, const Mesh *mesh, Mat4 model, Vec3 color)
 	mesh_draw(mesh);
 }
 
-/* Same as renderer_draw but with flat (unlit) shading: used for debug
- * wireframes and any overlay where lighting would only get in the way. */
+/* Unlit: debug wireframes and the aim bar. */
 void	renderer_draw_flat(Renderer *r, const Mesh *mesh, Mat4 model, Vec3 color)
 {
 	shader_use(&r->shader);
@@ -49,4 +50,31 @@ void	renderer_set_wireframe(Renderer *r, int on)
 		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 	else
 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+}
+
+/* Unit mesh -> the body's collider: scaled to its size, placed at its pose. A plane is placed
+ * by its equation, not its body position. */
+Mat4	renderer_body_model(const RigidBody *b, float inflate)
+{
+	const Collider	*c = &b->collider;
+	float			s;
+
+	if (c->type == SHAPE_SPHERE)
+	{
+		s = c->radius * 2.0f * inflate;
+		return (mat4_transform(b->position, b->orientation, vec3(s, s, s)));
+	}
+	if (c->type == SHAPE_BOX)
+		return (mat4_transform(b->position, b->orientation, vec3_scale(c->halfExtents, 2.0f * inflate)));
+	s = c->halfSize * 2.0f;
+	return (mat4_transform(collider_plane_origin(c), collider_plane_rotation(c), vec3(s, 1.0f, s)));
+}
+
+const Mesh	*renderer_body_mesh(const RigidBody *b, const Mesh *cube, const Mesh *sphere, const Mesh *plane)
+{
+	if (b->collider.type == SHAPE_SPHERE)
+		return (sphere);
+	if (b->collider.type == SHAPE_BOX)
+		return (cube);
+	return (plane);
 }

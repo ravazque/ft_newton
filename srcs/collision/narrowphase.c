@@ -1,48 +1,10 @@
-
 #include "newton.h"
 
 /*
- * Narrow-phase: the exact second pass. For each broad-phase pair it runs the
- * precise test for that shape combination and appends the resulting contacts
- * (normal + point + penetration) to w->contacts. The resolver consumes them.
- * Box tests live in narrowphase_box.c.
- */
-
-int	contact_sphere_sphere(const RigidBody *a, const RigidBody *b, Contact *out)
-{
-	Vec3	d;
-	float	dist;
-	float	sum_r;
-
-	d = vec3_sub(b->position, a->position);          /* [F12] */
-	sum_r = a->collider.radius + b->collider.radius;
-	dist = vec3_length(d);
-	if (dist > sum_r)
-		return (0);
-	if (dist > 0.0001f)
-		out->normal = vec3_scale(d, 1.0f / dist);
-	else
-		out->normal = vec3(0.0f, 1.0f, 0.0f);
-	out->penetration = sum_r - dist;
-	out->point = vec3_add(a->position, vec3_scale(out->normal, a->collider.radius - out->penetration * 0.5f));
-	return (1);
-}
-
-/* The plane is defined by its collider: normal . x = offset (it does not
- * depend on the plane body's position). The sphere touches it when the signed
- * distance from its center to the plane is <= its radius. */
-int	contact_sphere_plane(const RigidBody *sphere, const RigidBody *plane, Contact *out)
-{
-	float	dist;
-
-	dist = vec3_dot(plane->collider.normal, sphere->position) - plane->collider.offset;   /* [F13] */
-	if (dist > sphere->collider.radius)
-		return (0);
-	out->normal = vec3_neg(plane->collider.normal);
-	out->penetration = sphere->collider.radius - dist;
-	out->point = vec3_add(sphere->position, vec3_scale(out->normal, sphere->collider.radius));
-	return (1);
-}
+ * Narrow-phase: the exact test for each broad-phase pair, dispatched on the two
+ * shapes. Every generator writes its normal from its first body toward its
+ * second, so swapped arguments get their normals flipped back to "a toward b".
+*/
 
 static int	flip_contacts(int count, Contact *c)
 {
@@ -57,15 +19,11 @@ static int	flip_contacts(int count, Contact *c)
 	return (count);
 }
 
-/* Runs the right generator for (a, b), flipping the normal when the arguments
- * had to be swapped so it always points from a toward b. */
-static int	dispatch_pair(const RigidBody *a, const RigidBody *b, Contact *out)
+int	narrowphase_pair(const RigidBody *a, const RigidBody *b, Contact *out)
 {
-	ShapeType	ta;
-	ShapeType	tb;
+	ShapeType	ta = a->collider.type;
+	ShapeType	tb = b->collider.type;
 
-	ta = a->collider.type;
-	tb = b->collider.type;
 	if (ta == SHAPE_SPHERE && tb == SHAPE_SPHERE)
 		return (contact_sphere_sphere(a, b, out));
 	if (ta == SHAPE_SPHERE && tb == SHAPE_PLANE)
@@ -87,21 +45,20 @@ static int	dispatch_pair(const RigidBody *a, const RigidBody *b, Contact *out)
 
 static int	push_contacts(World *w, const Pair *p, const Contact *buf, int count)
 {
-	int	i;
+	Contact	*grown;
+	int		new_capacity;
+	int		i;
 
 	while (w->contactCount + count > w->contactCapacity)
 	{
-		int		newCap;
-		Contact	*grown;
-
-		newCap = 128;
+		new_capacity = 128;
 		if (w->contactCapacity > 0)
-			newCap = w->contactCapacity * 2;
-		grown = realloc(w->contacts, (size_t)newCap * sizeof(Contact));
+			new_capacity = w->contactCapacity * 2;
+		grown = realloc(w->contacts, (size_t)new_capacity * sizeof(Contact));
 		if (!grown)
 			return (0);
 		w->contacts = grown;
-		w->contactCapacity = newCap;
+		w->contactCapacity = new_capacity;
 	}
 	i = 0;
 	while (i < count)
@@ -118,28 +75,16 @@ static int	push_contacts(World *w, const Pair *p, const Contact *buf, int count)
 void	narrowphase_generate_contacts(World *w)
 {
 	Contact	buf[MAX_CONTACTS_PER_PAIR];
-	int		i;
 	int		found;
+	int		i;
 
 	w->contactCount = 0;
 	i = 0;
 	while (i < w->pairCount)
 	{
-		found = dispatch_pair(&w->bodies[w->pairs[i].a], &w->bodies[w->pairs[i].b], buf);
+		found = narrowphase_pair(&w->bodies[w->pairs[i].a], &w->bodies[w->pairs[i].b], buf);
 		if (found > 0)
 			push_contacts(w, &w->pairs[i], buf, found);
 		i++;
 	}
-}
-
-/*
- * The single contact query: 1 if the two bodies are touching/overlapping,
- * 0 otherwise. It only inspects each body's collider, so it works for any
- * pair you pass.
- */
-int	bodies_in_contact(const RigidBody *a, const RigidBody *b)
-{
-	Contact	buf[MAX_CONTACTS_PER_PAIR];
-
-	return (dispatch_pair(a, b, buf) > 0);
 }

@@ -1,12 +1,7 @@
-
 #include "newton.h"
 
-/*
- * The font the on-screen menu is drawn with: an 8x8 pixel bitmap per visible
- * ASCII character, written out here so the project needs no font file and no
- * text library. One byte per row (row 0 on top), bit 0 the leftmost pixel.
- * ui_text turns every set bit into a small quad.
-*/
+/* The menu font: an 8x8 bitmap per printable ASCII character, one byte per row (row 0 on top,
+ * bit 0 leftmost). */
 
 static const unsigned char	g_glyphs[FONT_GLYPH_COUNT][FONT_GLYPH_SIZE] = {
 	{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},   /* ' ' */

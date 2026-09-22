@@ -1,8 +1,6 @@
-
 #include "newton.h"
 
-/* A apple is the apples.csv body launched with a velocity; the mass override
- * is what the Q / E controls tune. */
+/* The projectile: an apples.csv body with the launch velocity and the mass the Q / E keys set. */
 RigidBody	projectile_make_apple(const ObjectDef *apple, Vec3 position, Vec3 velocity, float mass)
 {
 	RigidBody	b;

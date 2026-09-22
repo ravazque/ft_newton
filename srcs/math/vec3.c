@@ -1,5 +1,6 @@
-
 #include "newton.h"
+
+/* 3D vectors: positions, velocities, forces, torques and normals. */
 
 Vec3	vec3(float x, float y, float z)
 {

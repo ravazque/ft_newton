@@ -1,14 +1,12 @@
 #include "newton.h"
 
 /*
- * An ObjectDef is the bridge between one assets/objects CSV file and a
- * RigidBody: the file says what a kind of object is (shape, size, mass,
- * friction, elasticity, color); objectdef_make_body stamps it at a position.
- * Loading is strict: every property of the shape must be present, nothing
- * else may appear, and every value must be inside its physical range.
+ * One object file (apples, block, ground) <-> one ObjectDef <-> the bodies built
+ * from it. Loading is strict: every property of the shape must be present,
+ * nothing else may appear and every value must be in its physical range.
 */
 
-static const char	*g_sphere_keys[] = {"shape", "radius", "mass", "friction", "elasticity", "color"};
+static const char	*g_sphere_keys[] = {"shape", "radius", "mass", "friction", "elasticity", "rolling_resistance", "color"};
 static const char	*g_box_keys[] = {"shape", "size", "mass", "friction", "elasticity", "color"};
 static const char	*g_plane_keys[] = {"shape", "normal", "offset", "extent", "friction", "elasticity", "color"};
 
@@ -25,15 +23,15 @@ static int	parse_shape(const char *word, ShapeType *out)
 	return (1);
 }
 
-/* The properties that only one shape has. Planes are infinite and static,
- * so they carry no mass; 'extent' is just the size of the square drawn. */
+/* Only a sphere rolls, so only it has a rolling resistance; a plane is static, so it has no mass. */
 static void	read_shape_properties(ObjectDef *def, CsvFile *csv)
 {
 	if (def->shape == SHAPE_SPHERE)
 	{
-		csv_reject_unknown(csv, g_sphere_keys, 6);
+		csv_reject_unknown(csv, g_sphere_keys, 7);
 		def->radius = csv_get_float(csv, "radius");
 		def->mass = csv_get_float(csv, "mass");
+		def->rollingResistance = csv_get_float(csv, "rolling_resistance");
 	}
 	else if (def->shape == SHAPE_BOX)
 	{
@@ -50,19 +48,18 @@ static void	read_shape_properties(ObjectDef *def, CsvFile *csv)
 	}
 }
 
-/* Every check runs, so one bad file reports all its problems at once. */
 static void	validate(const ObjectDef *def, CsvFile *csv)
 {
 	if (def->shape == SHAPE_SPHERE)
 		csv_expect_positive(csv, "radius", def->radius);
+	if (def->shape == SHAPE_SPHERE)
+		csv_expect_range(csv, "rolling_resistance", def->rollingResistance, 0.0f, ROLLING_RESISTANCE_MAX);
 	if (def->shape == SHAPE_BOX)
 		csv_expect_positive_vec3(csv, "size", def->size);
 	if (def->shape == SHAPE_PLANE)
-	{
 		csv_expect_positive(csv, "extent", def->extent);
-		if (vec3_length_sq(def->normal) == 0.0f)
-			csv_error(csv, "normal", "a non-zero vector");
-	}
+	if (def->shape == SHAPE_PLANE && vec3_length_sq(def->normal) == 0.0f)
+		csv_error(csv, "normal", "a non-zero vector");
 	if (def->shape != SHAPE_PLANE)
 		csv_expect_positive(csv, "mass", def->mass);
 	csv_expect_min(csv, "friction", def->friction, 0.0f);
@@ -97,7 +94,6 @@ int	objectdef_load(ObjectDef *def, const char *path, ObjectKind kind)
 	return (1);
 }
 
-/* Planes are always static: an infinite surface has no meaningful mass. */
 RigidBody	objectdef_make_body(const ObjectDef *def, Vec3 position)
 {
 	RigidBody	b;
@@ -110,9 +106,10 @@ RigidBody	objectdef_make_body(const ObjectDef *def, Vec3 position)
 	else if (def->shape == SHAPE_BOX)
 		b.collider = collider_box(vec3_scale(def->size, 0.5f));
 	else
-		b.collider = collider_plane(def->normal, def->offset);
+		b.collider = collider_plane(def->normal, def->offset, def->extent);
 	b.friction = def->friction;
 	b.elasticity = def->elasticity;
+	b.rollingResistance = def->rollingResistance;
 	b.color = def->color;
 	if (def->shape == SHAPE_PLANE)
 		rb_make_static(&b);
@@ -121,9 +118,7 @@ RigidBody	objectdef_make_body(const ObjectDef *def, Vec3 position)
 	return (b);
 }
 
-/* Writes the definition back in the file's own format, so a value tuned in
- * the menu survives a restart. The order matches the shipped files: what the
- * shape needs first, then the material every shape shares. */
+/* Same layout as the shipped files: the shape's own properties, then the shared material. */
 int	objectdef_save(const ObjectDef *def, const char *path)
 {
 	FILE	*f = fopen(path, "w");
@@ -132,7 +127,7 @@ int	objectdef_save(const ObjectDef *def, const char *path)
 		return (fprintf(stderr, "%s: cannot write file\n", path), 0);
 	fprintf(f, "%s\n", CSV_HEADER);
 	if (def->shape == SHAPE_SPHERE)
-		fprintf(f, "shape,sphere,,\nradius,%g,,\nmass,%g,,\n", (double)def->radius, (double)def->mass);
+		fprintf(f, "shape,sphere,,\nradius,%g,,\nmass,%g,,\nrolling_resistance,%g,,\n", (double)def->radius, (double)def->mass, (double)def->rollingResistance);
 	else if (def->shape == SHAPE_BOX)
 		fprintf(f, "shape,box,,\nsize,%g,%g,%g\nmass,%g,,\n", (double)def->size.x, (double)def->size.y, (double)def->size.z, (double)def->mass);
 	else

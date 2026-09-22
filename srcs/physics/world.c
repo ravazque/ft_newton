@@ -1,5 +1,10 @@
-
 #include "newton.h"
+
+/*
+ * The world owns every body and advances them one fixed step at a time:
+ * integrate -> broad-phase -> narrow-phase -> contact response -> sleep -> cull.
+ * The per-step pipeline lives in srcs/collision, srcs/response and sleep.c / cull.c.
+*/
 
 void	world_init(World *w)
 {
@@ -41,13 +46,37 @@ int	world_add_body(World *w, RigidBody body)
 	return (w->bodyCount++);
 }
 
-/* Swap-with-last removal: O(1), but the body that was last changes index. */
+/* Warm-start memory is keyed by body index: contacts of the removed body and
+ * of the one that takes its slot would otherwise feed their impulses to the wrong pair. */
+static void	forget_contacts(World *w, int removed, int moved)
+{
+	const Contact	*c;
+	int				kept;
+	int				i;
+
+	kept = 0;
+	i = 0;
+	while (i < w->prevContactCount)
+	{
+		c = &w->prevContacts[i];
+		if (c->a != removed && c->b != removed && c->a != moved && c->b != moved)
+			w->prevContacts[kept++] = *c;
+		i++;
+	}
+	w->prevContactCount = kept;
+}
+
+/* O(1) swap-with-last removal: the last body takes the freed index. */
 void	world_remove_body(World *w, int handle)
 {
+	int	last;
+
 	if (handle < 0 || handle >= w->bodyCount)
 		return ;
-	w->bodies[handle] = w->bodies[w->bodyCount - 1];
+	last = w->bodyCount - 1;
+	w->bodies[handle] = w->bodies[last];
 	w->bodyCount--;
+	forget_contacts(w, handle, last);
 }
 
 void	world_clear(World *w)
@@ -56,7 +85,7 @@ void	world_clear(World *w)
 	w->prevContactCount = 0;
 }
 
-/* Used when the rules change under resting bodies (gravity edits, reset). */
+/* Used when the rules change under resting bodies (gravity, materials, reset). */
 void	world_wake_all(World *w)
 {
 	int	i;
@@ -70,18 +99,7 @@ void	world_wake_all(World *w)
 	}
 }
 
-static int	island_root(int *parent, int i)
-{
-	while (parent[i] != i)
-	{
-		parent[i] = parent[parent[i]];
-		i = parent[i];
-	}
-	return (i);
-}
-
-/* The per-body scratch arrays (islands, positional correction) follow the
- * body count; they are only reallocated when it grows. */
+/* The per-body scratch arrays only grow, and only when the body count does. */
 int	world_grow_scratch(World *w)
 {
 	int		*parent;
@@ -92,15 +110,15 @@ int	world_grow_scratch(World *w)
 	if (w->bodyCount <= w->scratchCapacity)
 		return (1);
 	parent = realloc(w->islandParent, (size_t)w->bodyCount * sizeof(int));
-	timer = realloc(w->islandTimer, (size_t)w->bodyCount * sizeof(float));
-	positions = realloc(w->startPositions, (size_t)w->bodyCount * sizeof(Vec3));
-	rotations = realloc(w->rotationDelta, (size_t)w->bodyCount * sizeof(Vec3));
 	if (parent)
 		w->islandParent = parent;
+	timer = realloc(w->islandTimer, (size_t)w->bodyCount * sizeof(float));
 	if (timer)
 		w->islandTimer = timer;
+	positions = realloc(w->startPositions, (size_t)w->bodyCount * sizeof(Vec3));
 	if (positions)
 		w->startPositions = positions;
+	rotations = realloc(w->rotationDelta, (size_t)w->bodyCount * sizeof(Vec3));
 	if (rotations)
 		w->rotationDelta = rotations;
 	if (!parent || !timer || !positions || !rotations)
@@ -109,97 +127,7 @@ int	world_grow_scratch(World *w)
 	return (1);
 }
 
-/*
- * Sleeping is decided per island: the set of dynamic bodies linked by
- * contacts (static bodies do not link anything). Every awake dynamic body
- * accumulates how long it has stayed below both speed thresholds; an island
- * goes to sleep only when ALL of its bodies have been still for SLEEP_TIME,
- * so a stack switches off as a whole. Sleeping one box at a time would drop
- * its contacts while its neighbours still move and kick the pile every time
- * they wake it again. Asleep bodies keep zero velocity and skip integration:
- * that is the "stable state" the impact must return to.
-*/
-static void	update_sleep(World *w, float dt)
-{
-	RigidBody	*b;
-	int			root;
-	int			i;
-
-	if (!world_grow_scratch(w))
-		return ;
-	i = 0;
-	while (i < w->bodyCount)
-	{
-		b = &w->bodies[i];
-		w->islandParent[i] = i;
-		w->islandTimer[i] = SLEEP_TIME;
-		if (b->invMass > 0.0f && b->awake)
-		{
-			if (vec3_length_sq(b->velocity) < SLEEP_LINEAR_EPS * SLEEP_LINEAR_EPS && vec3_length_sq(b->angularVelocity) < SLEEP_ANGULAR_EPS * SLEEP_ANGULAR_EPS)   /* [F24] */
-				b->sleepTimer += dt;
-			else
-				b->sleepTimer = 0.0f;
-		}
-		i++;
-	}
-	i = 0;
-	while (i < w->contactCount)
-	{
-		if (w->bodies[w->contacts[i].a].invMass > 0.0f && w->bodies[w->contacts[i].b].invMass > 0.0f)
-			w->islandParent[island_root(w->islandParent, w->contacts[i].a)] = island_root(w->islandParent, w->contacts[i].b);
-		i++;
-	}
-	i = 0;
-	while (i < w->bodyCount)
-	{
-		if (w->bodies[i].invMass > 0.0f && w->bodies[i].awake)
-		{
-			root = island_root(w->islandParent, i);
-			w->islandTimer[root] = fminf(w->islandTimer[root], w->bodies[i].sleepTimer);
-		}
-		i++;
-	}
-	i = 0;
-	while (i < w->bodyCount)
-	{
-		b = &w->bodies[i];
-		if (b->invMass > 0.0f && b->awake && w->islandTimer[island_root(w->islandParent, i)] >= SLEEP_TIME)
-		{
-			b->awake = 0;
-			b->velocity = vec3(0.0f, 0.0f, 0.0f);
-			b->angularVelocity = vec3(0.0f, 0.0f, 0.0f);
-		}
-		i++;
-	}
-}
-
-/* Dynamic bodies that flew out of the playable area are dropped so the object
- * count (and the broad-phase) only track what can still interact. */
-static void	cull_far_bodies(World *w)
-{
-	int	i;
-
-	i = 0;
-	while (i < w->bodyCount)
-	{
-		if (w->bodies[i].invMass > 0.0f && vec3_length_sq(w->bodies[i].position) > WORLD_CULL_DISTANCE * WORLD_CULL_DISTANCE)
-			world_remove_body(w, i);
-		else
-			i++;
-	}
-}
-
-/*
- * One fixed simulation step:
- *   1) integration - every awake body: forces + gravity -> velocity ->
- *      position / orientation.
- *   2) detection - broadphase fills w->pairs with candidate pairs,
- *      narrowphase turns them into w->contacts (normal/point/penetration).
- *   3) response - resolver applies impulses (with elasticity and friction)
- *      and pushes overlapping bodies apart.
- *   4) housekeeping - sleeping and culling.
- * A non-positive dt (pause, time scale 0) leaves the world untouched.
- */
+/* One fixed step. A non-positive dt (pause, time scale 0) leaves the world untouched. */
 void	world_step(World *w, float dt)
 {
 	int	i;
@@ -219,6 +147,6 @@ void	world_step(World *w, float dt)
 	broadphase_compute_pairs(w);
 	narrowphase_generate_contacts(w);
 	resolver_resolve(w);
-	update_sleep(w, dt);
-	cull_far_bodies(w);
+	sleep_update(w, dt);
+	cull_lost_bodies(w);
 }

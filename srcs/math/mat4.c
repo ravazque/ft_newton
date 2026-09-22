@@ -1,7 +1,6 @@
-
 #include "newton.h"
 
-/* All matrices are column-major: element (col c, row r) lives at m[c * 4 + r]. */
+/* 4x4 column-major matrices for the render: model transforms, camera view and perspective projection. */
 
 Mat4	mat4_identity(void)
 {

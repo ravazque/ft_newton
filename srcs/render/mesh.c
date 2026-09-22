@@ -1,8 +1,9 @@
-
 #include "newton.h"
 
-/* Uploads interleaved vertex data (position + normal, 6 floats/vertex) and an
- * index list to the GPU, building the VBO + EBO + VAO. Shared by every shape. */
+/* The three unit meshes every body is drawn with (cube, UV sphere, square), uploaded once to
+ * the GPU; the model matrix scales them. */
+
+/* Interleaved position + normal (6 floats per vertex) and an index list -> VBO + EBO + VAO. */
 static Mesh	mesh_upload(const float *verts, int vert_floats, const unsigned int *indices, int index_count)
 {
 	Mesh	mesh;
@@ -136,9 +137,9 @@ Mesh	mesh_sphere(int segments)
 	return (mesh);
 }
 
-Mesh	mesh_plane(float size)
+Mesh	mesh_plane(void)
 {
-	const float			h = size * 0.5f;
+	const float			h = 0.5f;
 	const float			verts[] = {
 		-h, 0.0f, -h, 0.0f, 1.0f, 0.0f,
 		h, 0.0f, -h, 0.0f, 1.0f, 0.0f,

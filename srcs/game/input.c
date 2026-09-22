@@ -1,23 +1,12 @@
-
 #include "newton.h"
 
 /*
- * THE KEYBOARD: every key the game reads, in one place.
- *
- * Two sets of controls coexist on purpose. These keys act on the running
- * simulation at once, which is what a full and direct control of gravity,
- * time, launch speed, angle and projectile mass means. The menu instead edits
- * a draft and changes nothing until Apply (srcs/game/scene.c), so a value can
- * be dialled in without the scene reacting halfway through.
- *
- * While the menu is open it owns the keyboard and the mouse, so the arrows
- * move its cursor instead of turning the camera.
- *
- * Nothing here computes physics or draws: it only moves numbers that
- * srcs/physics/ and srcs/render/ then act on.
+ * Every key the game reads. These act on the running simulation at once (direct
+ * control of gravity, time, launch speed, angle and apple mass); the menu, which
+ * owns keyboard and mouse while open, edits a draft instead (actions.c).
 */
 
-/* One-shot key detection (edge, not hold). */
+/* Pressed this frame (edge), not held. */
 static int	key_pressed(Game *g, int key)
 {
 	static char	prev[GLFW_KEY_LAST + 1];
@@ -38,8 +27,7 @@ static int	key_down(Game *g, int key)
 	return (glfwGetKey(window_handle(&g->window), key) == GLFW_PRESS);
 }
 
-/* Firing, spawning and the display toggles: things that happen once per
- * press, not while a key is held. */
+/* Once per press: firing, spawning and the display toggles. */
 static void	handle_actions(Game *g)
 {
 	if (key_pressed(g, GLFW_KEY_SPACE))
@@ -66,9 +54,7 @@ static void	handle_actions(Game *g)
 	}
 }
 
-/* I / K aim, J / L set the launch speed and Q / E the projectile mass. Held
- * keys change the value continuously, scaled by the frame time so the rate is
- * the same at any frame rate. */
+/* Held keys change a value at a fixed rate per second. The apple mass is the mass of the NEXT apples. */
 static void	handle_launch(Game *g, float frame_time)
 {
 	if (key_down(g, GLFW_KEY_I))
@@ -83,10 +69,10 @@ static void	handle_launch(Game *g, float frame_time)
 		g->appleDef.mass = fminf(PROJECTILE_MASS_MAX, g->appleDef.mass + CTRL_MASS_RATE * frame_time);
 	if (key_down(g, GLFW_KEY_Q))
 		g->appleDef.mass = fmaxf(PROJECTILE_MASS_MIN, g->appleDef.mass - CTRL_MASS_RATE * frame_time);
+	g->trebuchet.projectileMass = g->appleDef.mass;
 }
 
-/* Gravity and the time scale, the two knobs that act on the world itself.
- * Changing gravity wakes everything, so a resting pile falls again. */
+/* Changing gravity wakes everything, so a resting pile reacts again. */
 static void	handle_world_tuning(Game *g, float frame_time)
 {
 	if (key_down(g, GLFW_KEY_G))
@@ -105,9 +91,7 @@ static void	handle_world_tuning(Game *g, float frame_time)
 		g->timeScale = fmaxf(0.0f, g->timeScale - CTRL_TIME_RATE * frame_time);
 }
 
-/* WASD flies the eye, R / F raise and lower it, the arrows turn the view and
- * + / - change how fast it travels. The camera is free, so the whole 3D scene
- * can be inspected even though the gameplay stays on the XY plane. */
+/* WASD fly, R / F rise and fall, arrows turn, + / - change the fly speed. */
 static void	handle_camera(Game *g, float frame_time)
 {
 	float	step = g->camera.moveSpeed * frame_time;
@@ -140,20 +124,17 @@ static void	handle_camera(Game *g, float frame_time)
 		camera_change_speed(&g->camera, -CAM_SPEED_RATE * frame_time);
 }
 
-/* ESC: the menu takes over input and pauses the simulation; closing it
- * resumes, which is why the menu is also where Resume and Quit live. Opening
- * it refreshes the draft, so it always starts from the live values. */
+/* ESC opens the menu (pausing) or closes it (resuming). */
 static void	toggle_menu(Game *g)
 {
 	g->menu.open = !g->menu.open;
 	g->paused = g->menu.open;
 	if (g->menu.open)
-		scene_sync_draft(g);
+		action_sync_draft(g);
 	g->hud.refresh = 1;
 }
 
-/* Values edited in the menu only move the draft; Apply is what commits them,
- * which is why nothing is pushed onto the world here. */
+
 static void	handle_menu(Game *g, float frame_time)
 {
 	float	width;
@@ -163,10 +144,10 @@ static void	handle_menu(Game *g, float frame_time)
 	menu_layout(&g->menu, width, height);
 	menu_update(&g->menu, &g->window, frame_time);
 	if (g->menu.pending != ACTION_NONE)
-		scene_run_action(g, g->menu.pending);
+		action_run(g, g->menu.pending);
 }
 
-/* One frame of input: ESC first, then either the menu or the game's own keys. */
+
 void	input_poll(Game *g, float frame_time)
 {
 	if (key_pressed(g, GLFW_KEY_ESCAPE))
@@ -180,5 +161,4 @@ void	input_poll(Game *g, float frame_time)
 	handle_launch(g, frame_time);
 	handle_world_tuning(g, frame_time);
 	handle_camera(g, frame_time);
-	scene_apply_definitions(g);
 }

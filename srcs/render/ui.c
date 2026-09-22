@@ -1,18 +1,13 @@
 #include "newton.h"
 
 /*
- * Immediate-mode 2D drawing for the menu: rectangles and text, in window
- * pixels with the origin at the top-left corner.
- *
- * Everything is batched into one dynamic vertex buffer and sent to the GPU in
- * a single draw call per frame. A glyph pixel and a panel are the same thing
- * here - a colored quad - so the whole overlay costs one buffer upload and
- * one glDrawArrays, with the 3D shader reused in flat mode (uLit = 0) under
- * an orthographic projection.
+ * 2D overlay for the menu, in window pixels from the top-left corner. Panels and
+ * glyph pixels are all colored quads batched in one vertex buffer and drawn with
+ * a single glDrawArrays, reusing the 3D shader in per-vertex color mode under an
+ * orthographic projection.
 */
 
-/* Screen pixels -> clip space. Maps x to [-1, 1] and flips y so that y grows
- * downward, which is how a text layout is naturally written. */
+/* Window pixels -> clip space, y flipped so it grows downward like a page. */
 static Mat4	ui_projection(float width, float height)
 {
 	Mat4	m = mat4_identity();
@@ -81,9 +76,7 @@ static void	push_vertex(Ui *ui, float x, float y, Vec3 color)
 	ui->vertexCount++;
 }
 
-/* The one primitive everything else is made of: two triangles. The color
- * rides in the normal slot, so the vertex layout is the 3D one and the
- * fragment shader reads it as a flat color. */
+/* Two triangles; the color rides in the normal slot so the 3D vertex layout is reused. */
 void	ui_rect(Ui *ui, float x, float y, float w, float h, Vec3 color)
 {
 	if (ui->vertexCount + 6 > UI_MAX_VERTICES)
@@ -96,7 +89,6 @@ void	ui_rect(Ui *ui, float x, float y, float w, float h, Vec3 color)
 	push_vertex(ui, x, y + h, color);
 }
 
-/* A frame of four thin rectangles, used to outline panels and buttons. */
 void	ui_border(Ui *ui, float x, float y, float w, float h, float t, Vec3 color)
 {
 	ui_rect(ui, x, y, w, t, color);
@@ -105,23 +97,28 @@ void	ui_border(Ui *ui, float x, float y, float w, float h, float t, Vec3 color)
 	ui_rect(ui, x + w - t, y + t, t, h - 2.0f * t, color);
 }
 
-/* Draws one glyph as one quad per set bit. 'scale' is the size of a font
- * pixel, so the text size is always a whole multiple of the 8x8 cell and
- * never blurs. */
+/* One quad per set bit of the 8x8 glyph. Edges are snapped to whole screen
+ * pixels, so any scale stays sharp and every copy of a letter looks the same. */
 static void	draw_glyph(Ui *ui, char c, float x, float y, float scale, Vec3 color)
 {
 	const unsigned char	*rows = font_glyph(c);
+	float				left;
+	float				top;
 	int					row;
 	int					col;
 
+	x = roundf(x);
+	y = roundf(y);
 	row = 0;
 	while (row < FONT_GLYPH_SIZE)
 	{
+		top = roundf((float)row * scale);
 		col = 0;
 		while (col < FONT_GLYPH_SIZE)
 		{
+			left = roundf((float)col * scale);
 			if (rows[row] & (1u << col))
-				ui_rect(ui, x + (float)col * scale, y + (float)row * scale, scale, scale, color);
+				ui_rect(ui, x + left, y + top, roundf((float)(col + 1) * scale) - left, roundf((float)(row + 1) * scale) - top, color);
 			col++;
 		}
 		row++;
@@ -141,7 +138,6 @@ void	ui_text(Ui *ui, const char *text, float x, float y, float scale, Vec3 color
 	}
 }
 
-/* Right-aligned text, for the numeric column of the menu. */
 void	ui_text_right(Ui *ui, const char *text, float right, float y, float scale, Vec3 color)
 {
 	ui_text(ui, text, right - ui_text_width(text, scale), y, scale, color);
@@ -152,8 +148,7 @@ float	ui_text_width(const char *text, float scale)
 	return ((float)strlen(text) * FONT_ADVANCE * scale);
 }
 
-/* Uploads the frame's quads and draws them over the scene: no depth test (the
- * overlay always wins) and the shader in flat mode. */
+/* Uploads the batch and draws it over the scene, depth test off. */
 void	ui_end(Ui *ui, Renderer *r)
 {
 	if (ui->vertexCount == 0)

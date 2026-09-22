@@ -1,5 +1,6 @@
-
 #include "newton.h"
+
+/* A rigid body's mass properties and the ways forces and impulses change its motion [F8] [F9]. */
 
 RigidBody	rb_make(void)
 {
@@ -19,8 +20,7 @@ RigidBody	rb_make(void)
 	return (b);
 }
 
-/* Derives every mass-related quantity from the collider. A non-positive mass
- * means "immovable". */
+/* Mass and inertia follow the collider; a non-positive mass means immovable. */
 void	rb_set_mass(RigidBody *b, float mass)
 {
 	if (mass <= 0.0f)
@@ -30,12 +30,11 @@ void	rb_set_mass(RigidBody *b, float mass)
 	}
 	b->mass = mass;
 	b->invMass = 1.0f / mass;
-	b->invInertiaLocal = collider_compute_inertia(&b->collider, mass);   /* [F5] [F6] */
-	rb_update_inertia_world(b);
+	b->invInertiaLocal = inertia_local_inverse(&b->collider, mass);
+	inertia_update_world(b);
 }
 
-/* invMass = 0 and a zero inverse inertia make every impulse a no-op: the body
- * behaves as if infinitely heavy (ground, trebuchet). */
+/* Zero inverse mass and inertia turn every impulse into a no-op. */
 void	rb_make_static(RigidBody *b)
 {
 	b->mass = 0.0f;
@@ -46,14 +45,6 @@ void	rb_make_static(RigidBody *b)
 	b->angularVelocity = vec3(0.0f, 0.0f, 0.0f);
 }
 
-/* I^-1_world = R * I^-1_local * R^T, refreshed whenever the orientation moves. */
-void	rb_update_inertia_world(RigidBody *b)
-{
-	Mat3	r = mat3_from_quat(b->orientation);
-
-	b->invInertiaWorld = mat3_mul(mat3_mul(r, b->invInertiaLocal), mat3_transpose(r));   /* [F7] I_world^-1 = R I^-1 R^T */
-}
-
 void	rb_apply_force(RigidBody *b, Vec3 force)
 {
 	if (b->invMass == 0.0f)
@@ -61,14 +52,16 @@ void	rb_apply_force(RigidBody *b, Vec3 force)
 	b->forceAccum = vec3_add(b->forceAccum, force);
 }
 
-/* A force applied away from the center of mass also produces the torque
- * r x F, which is what makes an off-center hit spin the body. */
+/* Off the center of mass a force also makes a torque: that is what spins a body. */
 void	rb_apply_force_at_point(RigidBody *b, Vec3 force, Vec3 world_point)
 {
+	Vec3	arm;
+
 	if (b->invMass == 0.0f)
 		return ;
+	arm = vec3_sub(world_point, b->position);
 	b->forceAccum = vec3_add(b->forceAccum, force);
-	b->torqueAccum = vec3_add(b->torqueAccum, vec3_cross(vec3_sub(world_point, b->position), force));   /* [F8] T = r x F */
+	b->torqueAccum = vec3_add(b->torqueAccum, vec3_cross(arm, force));   /* [F8] T = r x F */
 }
 
 void	rb_apply_impulse(RigidBody *b, Vec3 impulse)
@@ -78,14 +71,23 @@ void	rb_apply_impulse(RigidBody *b, Vec3 impulse)
 	b->velocity = vec3_add(b->velocity, vec3_scale(impulse, b->invMass));
 }
 
-/* Instant velocity change: linear part scaled by 1/m, angular part by the
- * world inverse inertia applied to r x J. */
 void	rb_apply_impulse_at_point(RigidBody *b, Vec3 impulse, Vec3 world_point)
+{
+	Vec3	arm;
+
+	if (b->invMass == 0.0f)
+		return ;
+	arm = vec3_sub(world_point, b->position);
+	b->velocity = vec3_add(b->velocity, vec3_scale(impulse, b->invMass));												/* [F9] v += J / m */
+	b->angularVelocity = vec3_add(b->angularVelocity, mat3_mul_vec3(b->invInertiaWorld, vec3_cross(arm, impulse)));		/* [F9] w += I^-1 (r x J) */
+}
+
+/* A pure torque impulse: changes the spin, never the velocity. */
+void	rb_apply_angular_impulse(RigidBody *b, Vec3 angular_impulse)
 {
 	if (b->invMass == 0.0f)
 		return ;
-	b->velocity = vec3_add(b->velocity, vec3_scale(impulse, b->invMass));                                                                            /* [F9] v += J/m        */
-	b->angularVelocity = vec3_add(b->angularVelocity, mat3_mul_vec3(b->invInertiaWorld, vec3_cross(vec3_sub(world_point, b->position), impulse)));   /* [F9] w += I^-1 (r x J) */
+	b->angularVelocity = vec3_add(b->angularVelocity, mat3_mul_vec3(b->invInertiaWorld, angular_impulse));
 }
 
 void	rb_clear_accumulators(RigidBody *b)

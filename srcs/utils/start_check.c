@@ -1,5 +1,7 @@
-
 #include "newton.h"
+
+/* The optional [width height] arguments: digits only, within the window bounds, otherwise the
+ * default size. */
 
 static int	is_number(const char *argv)
 {
