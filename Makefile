@@ -20,7 +20,8 @@ SRCS = main.c \
        collision/collider.c collision/broadphase.c collision/narrowphase.c \
        collision/narrowphase_box.c \
        collision/resolver.c \
-       game/game.c game/catapult.c game/projectile.c game/structure.c \
+       game/game.c game/scene.c game/input.c \
+       game/trebuchet.c game/projectile.c game/structure.c \
        game/hud.c game/objectdef.c game/menu.c
 
 GLAD = glad/src/gl.c

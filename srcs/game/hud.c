@@ -31,7 +31,7 @@ void	hud_update(Hud *h, float frame_time_seconds)
 
 /* The FPS + object counters plus the live-tuned values, shown in
  * the window title so the scene itself stays clean. Hidden -> plain title. */
-void	hud_draw(Hud *h, const World *w, const Catapult *c, float time_scale, Window *win, int paused)
+void	hud_draw(Hud *h, const World *w, const Trebuchet *c, float time_scale, Window *win, int paused)
 {
 	char		title[192];
 	const char	*state;

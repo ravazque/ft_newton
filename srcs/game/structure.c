@@ -2,7 +2,7 @@
 #include "newton.h"
 
 /*
- * Spawners for the unstable structures the birds knock down, and
+ * Spawners for the unstable structures the apples knock down, and
  * the easy way to add MANY bodies on demand. Blocks come from block.csv and
  * are stacked from origin.y upward on the XY gameplay plane, with a hair of
  * spacing so neighbours start separated instead of interpenetrating.

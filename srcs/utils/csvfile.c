@@ -167,7 +167,7 @@ int	csv_load(CsvFile *c, const char *path)
 	c->path[CSV_PATH_LEN - 1] = '\0';
 	f = fopen(path, "r");
 	if (!f)
-		return (fprintf(stderr, "%s: cannot open file\n", path), 0);
+		return (fprintf(stderr, "%s: cannot open this object file (%s)\n", path, strerror(errno)), 0);
 	if (!fgets(line, sizeof(line), f) || strcmp(trim(line), CSV_HEADER) != 0)
 		return (fclose(f), fail(c, 1, "first line must be the header '" CSV_HEADER "'"));
 	lineno = 1;

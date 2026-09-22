@@ -15,6 +15,9 @@
  * keyboard walks the same list.
 */
 
+static const char	*g_back_note = "ESC or RESUME to go back";
+static const char	*g_dirty_note = "APPLY to use the edits";
+
 static const Vec3	g_panel = {0.07f, 0.08f, 0.11f};
 static const Vec3	g_panel_edge = {0.35f, 0.40f, 0.50f};
 static const Vec3	g_section = {1.00f, 0.80f, 0.25f};
@@ -87,9 +90,17 @@ static float	section_gap(const Menu *m, const MenuRow *row, float column_top, fl
 /* Height the taller column needs at a given font scale. The layout picks the
  * largest scale whose content still fits the window, so the menu is as big as
  * it can be and never runs off the bottom. */
+/* A glyph is FONT_GLYPH_SIZE tall inside a row of MENU_LINE_PIXELS, so it
+ * sits centred when it starts half the difference down. Every label, value,
+ * hint and button caption goes through this, so they share one baseline. */
+static float	centered_text_y(float y, float h, float scale)
+{
+	return (y + (h - (float)FONT_GLYPH_SIZE * scale) * 0.5f);
+}
+
 static float	content_height(Menu *m, float scale)
 {
-	float	line = (FONT_GLYPH_SIZE + 3.0f) * scale;
+	float	line = MENU_LINE_PIXELS * scale;
 	float	y[2];
 	int		i;
 
@@ -121,7 +132,7 @@ static float	column_width(Menu *m, int column, float scale)
 		{
 			needed = ui_text_width(m->rows[i].label, scale) + 2.0f * FONT_ADVANCE * scale;
 			if (m->rows[i].kind == MENU_VALUE)
-				needed += (7.0f + 6.0f) * FONT_ADVANCE * scale;
+				needed += (MENU_VALUE_CHARS + 2.0f * MENU_BUTTON_CHARS) * FONT_ADVANCE * scale + MENU_BUTTON_GAP * scale;
 			widest = fmaxf(widest, needed);
 		}
 		i++;
@@ -129,25 +140,35 @@ static float	column_width(Menu *m, int column, float scale)
 	return (widest);
 }
 
+/* The title line sits above the columns, so the panel has to be wide enough
+ * for it too or the longest note would run into the title. */
+static float	header_width(float scale)
+{
+	return (ui_text_width("ft_newton", scale) + ui_text_width(g_dirty_note, scale) + 4.0f * FONT_ADVANCE * scale);
+}
+
 static float	content_width(Menu *m, float scale)
 {
-	return (column_width(m, 0, scale) + column_width(m, 1, scale) + 9.0f * scale);
+	float	columns = column_width(m, 0, scale) + column_width(m, 1, scale) + 9.0f * scale;
+
+	return (fmaxf(columns, header_width(scale)));
 }
 
 /* Text is drawn in whole font pixels, so the scale is a whole number: the
  * menu grows with the window instead of blurring. The largest scale whose
- * content still fits the window wins, so nothing is ever clipped. */
+ * content still fits the share of the window the panel may take wins, so
+ * nothing is ever clipped and the scene stays visible around it. */
 static float	fit_scale(Menu *m, float width, float height)
 {
 	float	scale = 3.0f;
 
 	while (scale > 1.0f)
 	{
-		float	line = (FONT_GLYPH_SIZE + 3.0f) * scale;
+		float	line = MENU_LINE_PIXELS * scale;
 		float	needed_h = content_height(m, scale) + 3.0f * line;
 		float	needed_w = content_width(m, scale) + 24.0f * scale;
 
-		if (needed_h <= height && needed_w <= width)
+		if (needed_h <= height * MENU_HEIGHT_RATIO && needed_w <= width * MENU_WIDTH_RATIO)
 			return (scale);
 		scale -= 1.0f;
 	}
@@ -164,10 +185,10 @@ void	menu_layout(Menu *m, float width, float height)
 	int		i;
 
 	m->scale = fit_scale(m, width, height);
-	m->line = (FONT_GLYPH_SIZE + 3.0f) * m->scale;
+	m->line = MENU_LINE_PIXELS * m->scale;
 	m->pad = 6.0f * m->scale;
-	m->panelW = fminf(width - 4.0f * m->pad, content_width(m, m->scale) + 3.0f * m->pad);
-	m->panelH = fminf(height - 2.0f * m->pad, content_height(m, m->scale) + 3.0f * m->line + 2.0f * m->pad);
+	m->panelW = fminf(width * MENU_WIDTH_RATIO, content_width(m, m->scale) + 3.0f * m->pad);
+	m->panelH = fminf(height * MENU_HEIGHT_RATIO, content_height(m, m->scale) + 3.0f * m->line + 2.0f * m->pad);
 	m->panelX = (width - m->panelW) * 0.5f;
 	m->panelY = (height - m->panelH) * 0.5f;
 	left_w = column_width(m, 0, m->scale);
@@ -185,9 +206,9 @@ void	menu_layout(Menu *m, float width, float height)
 		row->y = y[col];
 		row->w = column_width(m, col, m->scale);
 		row->h = m->line;
-		row->buttonW = 3.0f * FONT_ADVANCE * m->scale;
+		row->buttonW = MENU_BUTTON_CHARS * FONT_ADVANCE * m->scale;
 		row->plusX = row->x + row->w - row->buttonW;
-		row->minusX = row->plusX - row->buttonW - 3.0f * m->scale;
+		row->minusX = row->plusX - row->buttonW - MENU_BUTTON_GAP * m->scale;
 		y[col] += m->line;
 		i++;
 	}
@@ -214,6 +235,7 @@ static void	apply_step(Menu *m, MenuRow *row, int direction)
 	v = roundf(v / row->step) * row->step;
 	*row->value = clampf(v, row->min, row->max);
 	m->valueChanged = 1;
+	m->dirty = 1;
 }
 
 static int	inside(float px, float py, float x, float y, float w, float h)
@@ -382,23 +404,26 @@ static void	format_value(const MenuRow *row, char *out, size_t size)
 		snprintf(out, size, "%.2f", (double)*row->value);
 }
 
+/* A button fills its whole row apart from one font pixel top and bottom, so
+ * every button in the menu is the same height and every pair of stacked
+ * buttons is the same distance apart. The caption is centred both ways. */
 static void	draw_button(Ui *ui, float x, float y, float w, float h, const char *label, float scale, int hot)
 {
 	Vec3	fill = g_button;
 
 	if (hot)
 		fill = g_button_hot;
-	ui_rect(ui, x, y + 2.0f * scale, w, h - 4.0f * scale, fill);
-	ui_text(ui, label, x + (w - ui_text_width(label, scale)) * 0.5f, y + 3.0f * scale, scale, g_label);
+	ui_rect(ui, x, y + MENU_BUTTON_INSET * scale, w, h - 2.0f * MENU_BUTTON_INSET * scale, fill);
+	ui_text(ui, label, x + (w - ui_text_width(label, scale)) * 0.5f, centered_text_y(y, h, scale), scale, g_label);
 }
 
 static void	draw_value_row(const Menu *m, Ui *ui, const MenuRow *row, int index, float scale)
 {
 	char	text[32];
 
-	ui_text(ui, row->label, row->x + 3.0f * scale, row->y + 2.0f * scale, scale, g_label);
+	ui_text(ui, row->label, row->x + 3.0f * scale, centered_text_y(row->y, row->h, scale), scale, g_label);
 	format_value(row, text, sizeof(text));
-	ui_text_right(ui, text, row->minusX - 5.0f * scale, row->y + 2.0f * scale, scale, g_value);
+	ui_text_right(ui, text, row->minusX - MENU_BUTTON_GAP * scale, centered_text_y(row->y, row->h, scale), scale, g_value);
 	draw_button(ui, row->minusX, row->y, row->buttonW, row->h, "-", scale, m->hoverRow == index && m->hoverPart == 0);
 	draw_button(ui, row->plusX, row->y, row->buttonW, row->h, "+", scale, m->hoverRow == index && m->hoverPart == 1);
 }
@@ -406,17 +431,34 @@ static void	draw_value_row(const Menu *m, Ui *ui, const MenuRow *row, int index,
 static void	draw_row(const Menu *m, Ui *ui, int index, float scale)
 {
 	const MenuRow	*row = &m->rows[index];
+	float			text_y = centered_text_y(row->y, row->h, scale);
 
 	if (m->selected == index && is_selectable(row))
 		ui_rect(ui, row->x, row->y, row->w, row->h, g_selected);
 	if (row->kind == MENU_SECTION)
-		ui_text(ui, row->label, row->x, row->y + 2.0f * scale, scale, g_section);
+		ui_text(ui, row->label, row->x, text_y, scale, g_section);
 	else if (row->kind == MENU_HINT)
-		ui_text(ui, row->label, row->x + 3.0f * scale, row->y + 2.0f * scale, scale, g_hint);
+		ui_text(ui, row->label, row->x + 3.0f * scale, text_y, scale, g_hint);
 	else if (row->kind == MENU_VALUE)
 		draw_value_row(m, ui, row, index, scale);
 	else
 		draw_button(ui, row->x, row->y, row->w, row->h, row->label, scale, m->hoverRow == index);
+}
+
+/* The title line, which doubles as the reminder that edits are still sitting
+ * in the draft: nothing the menu changes reaches the simulation until Apply. */
+static void	draw_header(const Menu *m, Ui *ui, float scale)
+{
+	const char	*note = g_back_note;
+	Vec3		color = g_hint;
+
+	if (m->dirty)
+	{
+		note = g_dirty_note;
+		color = g_section;
+	}
+	ui_text(ui, "ft_newton", m->panelX + m->pad, m->panelY + m->pad, scale, g_section);
+	ui_text_right(ui, note, m->panelX + m->panelW - m->pad, m->panelY + m->pad, scale, color);
 }
 
 /* The panel, the title and every row, using the rectangles menu_layout just
@@ -428,8 +470,7 @@ void	menu_draw(const Menu *m, Ui *ui)
 
 	ui_rect(ui, m->panelX, m->panelY, m->panelW, m->panelH, g_panel);
 	ui_border(ui, m->panelX, m->panelY, m->panelW, m->panelH, 2.0f * scale, g_panel_edge);
-	ui_text(ui, "ft_newton", m->panelX + m->pad, m->panelY + m->pad, scale, g_section);
-	ui_text_right(ui, "ESC or RESUME to go back", m->panelX + m->panelW - m->pad, m->panelY + m->pad, scale, g_hint);
+	draw_header(m, ui, scale);
 	i = 0;
 	while (i < m->rowCount)
 	{

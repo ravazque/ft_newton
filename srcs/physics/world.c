@@ -195,7 +195,7 @@ static void	cull_far_bodies(World *w)
  *      position / orientation.
  *   2) detection - broadphase fills w->pairs with candidate pairs,
  *      narrowphase turns them into w->contacts (normal/point/penetration).
- *   3) response - resolver applies impulses (with restitution and friction)
+ *   3) response - resolver applies impulses (with elasticity and friction)
  *      and pushes overlapping bodies apart.
  *   4) housekeeping - sleeping and culling.
  * A non-positive dt (pause, time scale 0) leaves the world untouched.

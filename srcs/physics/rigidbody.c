@@ -10,7 +10,7 @@ RigidBody	rb_make(void)
 	b.mass = 1.0f;
 	b.invMass = 1.0f;
 	b.orientation = quat_identity();
-	b.restitution = 0.4f;
+	b.elasticity = 0.4f;
 	b.friction = 0.5f;
 	b.color = vec3(0.7f, 0.7f, 0.7f);
 	b.awake = 1;
@@ -35,7 +35,7 @@ void	rb_set_mass(RigidBody *b, float mass)
 }
 
 /* invMass = 0 and a zero inverse inertia make every impulse a no-op: the body
- * behaves as if infinitely heavy (ground, catapult). */
+ * behaves as if infinitely heavy (ground, trebuchet). */
 void	rb_make_static(RigidBody *b)
 {
 	b->mass = 0.0f;

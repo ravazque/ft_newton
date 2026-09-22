@@ -21,14 +21,14 @@
 # define SHADER_FRAG "shaders/basic.frag"
 
 /* ---- Object definition files (relative to the run directory) ---- */
-# define ASSET_DIR       "assets/"
-# define ASSET_BIRD      ASSET_DIR "bird.csv"
-# define ASSET_BLOCK     ASSET_DIR "block.csv"
-# define ASSET_GROUND    ASSET_DIR "ground.csv"
-# define ASSET_CATAPULT  ASSET_DIR "catapult.csv"
+# define ASSET_DIR        "assets/"
+# define ASSET_APPLE      ASSET_DIR "apples.csv"
+# define ASSET_BLOCK      ASSET_DIR "block.csv"
+# define ASSET_GROUND     ASSET_DIR "ground.csv"
+# define ASSET_TREBUCHET  ASSET_DIR "trebuchet.csv"
 
 /* ---- CSV object file reader ---- */
-# define CSV_HEADER       "property,value1,value2,value3"
+# define CSV_HEADER       "# property,value1,value2,value3"
 # define CSV_MAX_ENTRIES  32
 # define CSV_KEY_LEN      32
 # define CSV_LINE_LEN     256
@@ -49,6 +49,13 @@
 # define MENU_MAX_ROWS      64
 # define MENU_REPEAT_DELAY  0.35f  /* s holding a +/- button before it repeats */
 # define MENU_REPEAT_PERIOD 0.06f  /* s between repeats while held */
+# define MENU_WIDTH_RATIO   0.80f  /* panel never covers more than this much of the window */
+# define MENU_HEIGHT_RATIO  0.85f
+# define MENU_LINE_PIXELS   (FONT_GLYPH_SIZE + 3)  /* font pixels of one menu row */
+# define MENU_BUTTON_CHARS  3.5f   /* width of a [-] / [+] button, in font advances */
+# define MENU_BUTTON_INSET  1.0f   /* font pixels trimmed off a button's top and bottom */
+# define MENU_BUTTON_GAP    3.0f   /* font pixels between the [-] and the [+] */
+# define MENU_VALUE_CHARS   7.0f   /* room a value row keeps for its number */
 
 /* ---- Background clear color (RGB, 0..1) ---- */
 # define CLEAR_R 0.10f
@@ -71,7 +78,7 @@
 # define ANGULAR_DAMPING    0.98f           /* angular velocity kept per second */
 
 /* ---- Contact solver ---- */
-# define RESTITUTION_THRESHOLD  1.0f   /* m/s: slower impacts do not bounce   */
+# define ELASTICITY_THRESHOLD   1.0f   /* m/s: slower impacts do not bounce    */
 # define PENETRATION_SLOP       0.005f /* m: overlap tolerated before pushing  */
 # define PENETRATION_PERCENT    0.2f   /* fraction of the overlap fixed per pass */
 # define POSITION_ITERATIONS    3      /* positional correction passes per step */
@@ -87,13 +94,14 @@
 /* ---- Collision detection ---- */
 # define MAX_CONTACTS_PER_PAIR  4           /* manifold cap per body pair   */
 
-/* ---- Camera orbit ---- */
-# define CAM_ORBIT_SPEED   DEG2RAD(60.0f)  /* rad/s while a key is held */
-# define CAM_ZOOM_SPEED    12.0f           /* m/s while a key is held   */
-# define CAM_MIN_DISTANCE  4.0f
-# define CAM_MAX_DISTANCE  90.0f
-# define CAM_MIN_PITCH     DEG2RAD(-5.0f)
-# define CAM_MAX_PITCH     DEG2RAD(85.0f)
+/* ---- Free-flying camera ---- */
+# define CAM_LOOK_SPEED    DEG2RAD(70.0f)  /* rad/s of yaw or pitch while an arrow is held */
+# define CAM_MOVE_SPEED    14.0f           /* m/s the camera flies at, by default         */
+# define CAM_SPEED_MIN     2.0f            /* m/s                                         */
+# define CAM_SPEED_MAX     60.0f           /* m/s                                         */
+# define CAM_SPEED_RATE    12.0f           /* m/s of fly speed gained per second on + / - */
+# define CAM_MIN_PITCH     DEG2RAD(-89.0f) /* straight down would make the view degenerate */
+# define CAM_MAX_PITCH     DEG2RAD(89.0f)
 
 /* ---- Live controls (change per second while a key is held) ---- */
 # define CTRL_SPEED_RATE     10.0f  /* launch speed, m/s per s */
@@ -105,18 +113,27 @@
 # define LAUNCH_SPEED_MIN    1.0f   /* m/s */
 # define LAUNCH_SPEED_MAX    60.0f  /* m/s: 0.5 m per fixed step, well inside the 2 m contact window of a 1 m block */
 # define LAUNCH_ANGLE_MAX    90.0f  /* deg above +X: straight up */
-# define LAUNCH_ANGLE_MIN    (-70.0f) /* deg: aiming lower would fire through the catapult's own base */
-# define ARM_ANGLE_MAX       90.0f  /* deg: the catapult arm stays above its base */
+# define LAUNCH_ANGLE_MIN    (-70.0f) /* deg: aiming lower would fire through the trebuchet's own base */
+# define ARM_ANGLE_MAX       90.0f  /* deg: the trebuchet arm stays above its base */
 # define PROJECTILE_MASS_MIN 0.1f   /* kg */
 # define PROJECTILE_MASS_MAX 50.0f  /* kg, the menu's upper bound */
 # define GRAVITY_MIN         (-40.0f) /* m/s^2, the menu's bounds for gravity */
 # define GRAVITY_MAX         20.0f
 # define FRICTION_MAX        20.0f  /* the menu's upper bound (>1 is legal, just very grippy) */
-# define LAUNCH_CLEARANCE    0.1f   /* m between the arm tip and a new bird, along the launch direction */
+# define LAUNCH_CLEARANCE    0.1f   /* m between the arm tip and a new apple, along the launch direction */
+
+/* ---- Trebuchet frame: what the file does not spell out, as proportions ---- */
+# define TREB_PARTS            5      /* sill, two A-frame legs, arm, counterweight */
+# define TREB_PIVOT_RATIO      0.72f  /* share of the arm on the throwing side of the pivot */
+# define TREB_LEG_SPREAD_RATIO 0.45f  /* foot of each A-frame leg, as a share of base_size.x */
+# define TREB_LEG_THICK_RATIO  0.07f  /* leg thickness, as a share of frame_height */
+# define TREB_ANGLE_STEP       1.0f   /* deg between the launch angles sampled for the spawn distance */
 
 /* ---- Scene layout ---- */
 # define STRUCTURE_X         8.0f   /* where 1/2/3 spawn structures  */
 # define STRESS_X            20.0f  /* where 4 spawns the large wall */
-# define AIM_LENGTH_PER_MPS  0.12f  /* aim bar length per m/s of launch speed */
+# define AIM_LENGTH_PER_MPS  0.12f  /* m of the thin aim tail per m/s of launch speed */
+# define AIM_BAR_THICKNESS   0.10f  /* m: the barrel, from the arm tip to the spawn point */
+# define AIM_TAIL_THICKNESS  0.04f  /* m: the thin line that grows with the launch speed */
 
 #endif

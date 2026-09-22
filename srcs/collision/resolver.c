@@ -9,8 +9,8 @@
  *   1) wake  - a sleeping body touched by an awake dynamic one wakes up.
  *   2) prepare - per contact: friction basis, effective masses (how much a
  *      unit impulse changes the relative velocity, including rotation) and
- *      the restitution target. Only impacts faster than
- *      RESTITUTION_THRESHOLD bounce; resting contacts aim for zero relative
+ *      the elasticity target. Only impacts faster than
+ *      ELASTICITY_THRESHOLD bounce; resting contacts aim for zero relative
  *      speed, which is what kills the endless micro-bounce. A contact that
  *      already existed last step starts from last step's impulse (warm
  *      starting): resting stacks then converge across steps instead of
@@ -120,7 +120,7 @@ static const Contact	*find_previous(const World *w, const Contact *c, int *curso
 	return (NULL);
 }
 
-/* Basis, effective masses and restitution target. The target comes from the
+/* Basis, effective masses and elasticity target. The target comes from the
  * relative velocity BEFORE any impulse of this step is applied: warm starts
  * of neighbouring contacts move the bodies first and would otherwise be read
  * as a violent impact, turning a resting stack into a bounce. */
@@ -136,8 +136,8 @@ static void	prepare_contact(const World *w, Contact *c)
 	c->massT2 = effective_mass(a, b, c, c->t2);
 	vn = vec3_dot(relative_velocity(a, b, c), c->normal);                     /* [F18] */
 	c->bias = 0.0f;
-	if (vn < -RESTITUTION_THRESHOLD)
-		c->bias = -fmaxf(a->restitution, b->restitution) * vn;                /* [F20] */
+	if (vn < -ELASTICITY_THRESHOLD)
+		c->bias = -fmaxf(a->elasticity, b->elasticity) * vn;                /* [F20] */
 	c->jn = 0.0f;
 	c->jt1 = 0.0f;
 	c->jt2 = 0.0f;

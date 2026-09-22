@@ -3,9 +3,9 @@
 # define NEWTON_H
 
 # include "defines.h"
-# include "formulas.h"   /* every physics formula, tagged [F1]..[F25] */
 
 # include <stdlib.h>
+# include <errno.h>
 # include <string.h>
 # include <math.h>
 # include <stdio.h>
@@ -98,16 +98,16 @@ typedef struct Mesh
 	int				indexCount;
 }	Mesh;
 
-/* Produces the View and Projection matrices. The eye orbits 'target' at
- * 'distance' (yaw around Y, pitch above the horizon); 3D even if gameplay is 2D. */
+/* Produces the View and Projection matrices. A free-flying eye: it sits at
+ * 'position' and looks along (yaw around Y, pitch above the horizon), so it
+ * can be walked anywhere in the scene instead of circling a fixed point. */
 typedef struct Camera
 {
 	Vec3	position;
-	Vec3	target;
 	Vec3	up;
 	float	yaw;
 	float	pitch;
-	float	distance;
+	float	moveSpeed;    /* m/s while a movement key is held */
 	float	fovYDegrees;
 	float	nearPlane;
 	float	farPlane;
@@ -179,7 +179,7 @@ typedef struct Contact
 	float	massNormal;   /* effective mass along the normal       */
 	float	massT1;
 	float	massT2;
-	float	bias;         /* restitution target separating speed   */
+	float	bias;         /* elasticity target separating speed   */
 	float	jn;           /* accumulated impulses (normal, tangents) */
 	float	jt1;
 	float	jt2;
@@ -193,9 +193,9 @@ typedef struct Contact
 typedef enum ObjectKind
 {
 	KIND_BLOCK,
-	KIND_BIRD,
+	KIND_APPLE,
 	KIND_GROUND,
-	KIND_CATAPULT
+	KIND_TREBUCHET
 }	ObjectKind;
 
 /* The core data the whole engine revolves around: an object that translates and
@@ -217,7 +217,7 @@ typedef struct RigidBody
 	Mat3	invInertiaLocal;  /* inverse inertia in body space (const) */
 	Mat3	invInertiaWorld;  /* R * invInertiaLocal * R^T, per step   */
 	/* material */
-	float	restitution;      /* 0 = no bounce, 1 = perfectly elastic */
+	float	elasticity;      /* 0 = no bounce, 1 = perfectly elastic */
 	float	friction;         /* Coulomb coefficient, 0 = ice         */
 	Vec3	color;            /* render color (RGB 0..1)              */
 	/* shape */
@@ -287,7 +287,7 @@ typedef struct ObjectDef
 	float		extent;       /* plane: size of the drawn ground square  */
 	float		mass;         /* > 0 (planes have none and are static)   */
 	float		friction;
-	float		restitution;
+	float		elasticity;
 	Vec3		color;
 }	ObjectDef;
 
@@ -295,24 +295,28 @@ typedef struct ObjectDef
 /*  GAME TYPES                                                                */
 /* ========================================================================== */
 
-/* The launcher: a static base + arm built from boxes, plus the live-tunable
- * launch parameters (speed / angle / mass) the player controls at runtime. */
-typedef struct Catapult
+/* The launcher: five static boxes (sill, two A-frame legs, throwing arm and
+ * counterweight) plus the live-tunable launch parameters (speed / angle /
+ * mass) the player controls at runtime. */
+typedef struct Trebuchet
 {
-	Vec3	position;         /* base center on the ground             */
-	Vec3	baseSize;         /* full extents of the base box          */
-	float	armLength;
+	Vec3	position;          /* sill center on the ground                   */
+	Vec3	baseSize;          /* full extents of the sill box                */
+	float	frameHeight;       /* m: the pivot, above the ground              */
+	float	armLength;         /* m: the whole arm, both sides of the pivot   */
 	float	armThickness;
-	float	armAngle;         /* degrees above +X, from the base top   */
-	float	launchSpeed;      /* m/s                                   */
-	float	launchAngle;      /* degrees above +X                      */
-	float	projectileMass;   /* kg                                    */
-	float	projectileRadius; /* m (from the bird definition)          */
+	float	armAngle;          /* degrees the throwing side sits above +X     */
+	Vec3	counterweightSize; /* full extents of the weight on the short side */
+	float	launchSpeed;       /* m/s                                         */
+	float	launchAngle;       /* degrees above +X                            */
+	float	projectileMass;    /* kg                                          */
+	float	projectileRadius;  /* m (from the apple definition)               */
 	float	friction;
-	float	restitution;
+	float	elasticity;
 	Vec3	color;
-	Vec3	launchPoint;      /* where birds appear (set by catapult_build) */
-}	Catapult;
+	Vec3	launchPoint;       /* the arm tip, where apples are released      */
+	float	spawnDistance;     /* m past the tip, the same for every angle    */
+}	Trebuchet;
 
 /* On-screen overlay: FPS, object counter and live values. Hideable for a clean view. */
 typedef struct Hud
@@ -336,13 +340,10 @@ typedef enum MenuRowKind
 typedef enum MenuAction
 {
 	ACTION_NONE,
+	ACTION_APPLY,
 	ACTION_RELOAD,
 	ACTION_SAVE,
 	ACTION_RESET,
-	ACTION_SPAWN_WALL,
-	ACTION_SPAWN_PYRAMID,
-	ACTION_SPAWN_TOWER,
-	ACTION_SPAWN_BIG_WALL,
 	ACTION_RESUME,
 	ACTION_QUIT
 }	MenuAction;
@@ -381,6 +382,7 @@ typedef struct Menu
 	int			heldPart;
 	float		repeatTimer;
 	int			valueChanged;  /* set when a value moved this frame   */
+	int			dirty;         /* edits are waiting for Apply         */
 	MenuAction	pending;       /* action clicked this frame           */
 	float		panelX;        /* geometry, recomputed by menu_layout */
 	float		panelY;
@@ -397,6 +399,20 @@ typedef struct DebugDraw
 	int	enabled;
 }	DebugDraw;
 
+/* What the menu edits. It is a copy, never the running simulation: the rows
+ * move these numbers and nothing happens until Apply pushes them across (or
+ * Save writes them to the files). That way a value can be dialled in without
+ * the scene reacting halfway through. */
+typedef struct Draft
+{
+	ObjectDef	apple;
+	ObjectDef	block;
+	ObjectDef	ground;
+	Trebuchet	trebuchet;
+	float		gravityY;
+	float		timeScale;
+}	Draft;
+
 /* Top-level application: wires every module together and runs the main loop. */
 typedef struct Game
 {
@@ -408,11 +424,12 @@ typedef struct Game
 	Camera		camera;
 	DebugDraw	debug;
 	Hud			hud;
-	Catapult	catapult;     /* the live one: launch settings change with the keys */
-	Catapult	catapultDef;  /* as read from the file, restored by a reset       */
-	ObjectDef	birdDef;
+	Trebuchet	trebuchet;     /* the live one: launch settings change with the keys */
+	Trebuchet	trebuchetDef;  /* what a reset goes back to                        */
+	ObjectDef	appleDef;
 	ObjectDef	blockDef;
 	ObjectDef	groundDef;
+	Draft		draft;         /* the menu's working copy, committed by Apply      */
 	float		fixedDt;
 	float		timeScale;   /* runtime control over "time" */
 	int			paused;      /* set by P, or while the menu is open */
@@ -501,9 +518,9 @@ void	mesh_release(Mesh *mesh);
 
 /* ---- Camera ---- */
 Camera	camera_default(void);
-void	camera_update(Camera *cam);
-void	camera_orbit(Camera *cam, float delta_yaw, float delta_pitch);
-void	camera_zoom(Camera *cam, float delta_distance);
+void	camera_look(Camera *cam, float delta_yaw, float delta_pitch);
+void	camera_move(Camera *cam, Vec3 local_delta);
+void	camera_change_speed(Camera *cam, float delta);
 Mat4	camera_view(const Camera *cam);
 Mat4	camera_projection(const Camera *cam, float aspect);
 
@@ -619,16 +636,16 @@ int			objectdef_save(const ObjectDef *def, const char *path);
 /*  GAME FUNCTIONS                                                            */
 /* ========================================================================== */
 
-/* ---- Catapult ---- */
-int			catapult_load(Catapult *c, const char *path, const ObjectDef *bird);
-int			catapult_save(const Catapult *c, const char *path);
-void		catapult_build(Catapult *c, World *w);
-Vec3		catapult_direction(const Catapult *c);
-Vec3		catapult_spawn_point(const Catapult *c);
-int			catapult_fire(const Catapult *c, const ObjectDef *bird, World *w);
+/* ---- Trebuchet ---- */
+int			trebuchet_load(Trebuchet *c, const char *path, const ObjectDef *apple);
+int			trebuchet_save(const Trebuchet *c, const char *path);
+void		trebuchet_build(Trebuchet *c, World *w);
+Vec3		trebuchet_direction(const Trebuchet *c);
+Vec3		trebuchet_spawn_point(const Trebuchet *c);
+int			trebuchet_fire(const Trebuchet *c, const ObjectDef *apple, World *w);
 
-/* ---- Projectile (the bird) ---- */
-RigidBody	projectile_make_bird(const ObjectDef *bird, Vec3 position, Vec3 velocity, float mass);
+/* ---- Projectile (the apple) ---- */
+RigidBody	projectile_make_apple(const ObjectDef *apple, Vec3 position, Vec3 velocity, float mass);
 
 /* ---- Structure (walls / towers / pyramids of blocks) ---- */
 void		structure_spawn_wall(World *w, const ObjectDef *block, Vec3 origin, int columns, int rows);
@@ -638,15 +655,26 @@ void		structure_spawn_tower(World *w, const ObjectDef *block, Vec3 origin, int h
 /* ---- Hud ---- */
 Hud			hud_default(void);
 void		hud_update(Hud *h, float frame_time_seconds);
-void		hud_draw(Hud *h, const World *w, const Catapult *c, float time_scale, Window *win, int paused);
+void		hud_draw(Hud *h, const World *w, const Trebuchet *c, float time_scale, Window *win, int paused);
 
 /* ---- DebugDraw ---- */
 void		debugdraw_draw_colliders(const DebugDraw *d, const World *w, Renderer *r, const Mesh *cube, const Mesh *sphere, const Mesh *plane);
 
-/* ---- Game ---- */
+/* ---- Game: start-up, the frame and the loop (srcs/game/game.c) ---- */
 int			game_init(Game *g, int argc, char **argv);
 void		game_run(Game *g);
 void		game_shutdown(Game *g);
+
+/* ---- Scene: what is in the world, and what the menu does to it (scene.c) ---- */
+int			scene_load_assets(Game *g);
+void		scene_build(Game *g);
+void		scene_build_menu(Game *g);
+void		scene_sync_draft(Game *g);
+void		scene_apply_definitions(Game *g);
+void		scene_run_action(Game *g, MenuAction action);
+
+/* ---- Input: every key the game reads (srcs/game/input.c) ---- */
+void		input_poll(Game *g, float frame_time);
 
 /* ---- Utils ---- */
 void		check_input(int argc, char **argv, Camera *camera);

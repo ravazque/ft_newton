@@ -3,14 +3,14 @@
 /*
  * An ObjectDef is the bridge between one assets/objects CSV file and a
  * RigidBody: the file says what a kind of object is (shape, size, mass,
- * friction, restitution, color); objectdef_make_body stamps it at a position.
+ * friction, elasticity, color); objectdef_make_body stamps it at a position.
  * Loading is strict: every property of the shape must be present, nothing
  * else may appear, and every value must be inside its physical range.
 */
 
-static const char	*g_sphere_keys[] = {"shape", "radius", "mass", "friction", "restitution", "color"};
-static const char	*g_box_keys[] = {"shape", "size", "mass", "friction", "restitution", "color"};
-static const char	*g_plane_keys[] = {"shape", "normal", "offset", "extent", "friction", "restitution", "color"};
+static const char	*g_sphere_keys[] = {"shape", "radius", "mass", "friction", "elasticity", "color"};
+static const char	*g_box_keys[] = {"shape", "size", "mass", "friction", "elasticity", "color"};
+static const char	*g_plane_keys[] = {"shape", "normal", "offset", "extent", "friction", "elasticity", "color"};
 
 static int	parse_shape(const char *word, ShapeType *out)
 {
@@ -66,7 +66,7 @@ static void	validate(const ObjectDef *def, CsvFile *csv)
 	if (def->shape != SHAPE_PLANE)
 		csv_expect_positive(csv, "mass", def->mass);
 	csv_expect_min(csv, "friction", def->friction, 0.0f);
-	csv_expect_range(csv, "restitution", def->restitution, 0.0f, 1.0f);
+	csv_expect_range(csv, "elasticity", def->elasticity, 0.0f, 1.0f);
 	csv_expect_range_vec3(csv, "color", def->color, 0.0f, 1.0f);
 }
 
@@ -86,7 +86,7 @@ int	objectdef_load(ObjectDef *def, const char *path, ObjectKind kind)
 		return (fprintf(stderr, "%s: unknown shape '%s' (expected sphere, box or plane)\n", path, shape), 0);
 	read_shape_properties(def, &csv);
 	def->friction = csv_get_float(&csv, "friction");
-	def->restitution = csv_get_float(&csv, "restitution");
+	def->elasticity = csv_get_float(&csv, "elasticity");
 	def->color = csv_get_vec3(&csv, "color");
 	if (csv.errors)
 		return (0);
@@ -112,7 +112,7 @@ RigidBody	objectdef_make_body(const ObjectDef *def, Vec3 position)
 	else
 		b.collider = collider_plane(def->normal, def->offset);
 	b.friction = def->friction;
-	b.restitution = def->restitution;
+	b.elasticity = def->elasticity;
 	b.color = def->color;
 	if (def->shape == SHAPE_PLANE)
 		rb_make_static(&b);
@@ -137,7 +137,7 @@ int	objectdef_save(const ObjectDef *def, const char *path)
 		fprintf(f, "shape,box,,\nsize,%g,%g,%g\nmass,%g,,\n", (double)def->size.x, (double)def->size.y, (double)def->size.z, (double)def->mass);
 	else
 		fprintf(f, "shape,plane,,\nnormal,%g,%g,%g\noffset,%g,,\nextent,%g,,\n", (double)def->normal.x, (double)def->normal.y, (double)def->normal.z, (double)def->offset, (double)def->extent);
-	fprintf(f, "friction,%g,,\nrestitution,%g,,\ncolor,%g,%g,%g\n", (double)def->friction, (double)def->restitution, (double)def->color.x, (double)def->color.y, (double)def->color.z);
+	fprintf(f, "friction,%g,,\nelasticity,%g,,\ncolor,%g,%g,%g\n", (double)def->friction, (double)def->elasticity, (double)def->color.x, (double)def->color.y, (double)def->color.z);
 	if (fclose(f) != 0)
 		return (fprintf(stderr, "%s: write failed\n", path), 0);
 	return (1);
