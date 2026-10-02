@@ -33,12 +33,12 @@ that implements each formula, and `docs/info/physics.md` explains the same tag.
 
 | Document | What it explains |
 |---|---|
-| [docs/info/architecture.md](docs/info/architecture.md) | The source tree, one responsibility per file, the main loop and one physics step |
-| [docs/info/physics.md](docs/info/physics.md) | Every formula the engine implements, tagged `[F1]` to `[F26]`, and where it lives |
-| [docs/info/collisions.md](docs/info/collisions.md) | Broad-phase, narrow-phase, contact response, sleeping, the bounded ground, spawning without overlaps, the classic collision problems |
-| [docs/info/rendering.md](docs/info/rendering.md) | The OpenGL pipeline: window, meshes, camera, draw calls, debug wireframes, the menu overlay |
-| [docs/info/shaders.md](docs/info/shaders.md) | The vertex and fragment shaders, line by line |
-| [docs/info/object-files.md](docs/info/object-files.md) | The CSV files that define apples, blocks, ground and trebuchet, and how they are checked |
+| [architecture.md](docs/info/architecture.md) | The source tree, one responsibility per file, the main loop and one physics step |
+| [physics.md](docs/info/physics.md) | Every formula the engine implements, tagged `[F1]` to `[F26]`, and where it lives |
+| [collisions.md](docs/info/collisions.md) | Broad-phase, narrow-phase, contact response, sleeping, the bounded ground, spawning without overlaps, the classic collision problems |
+| [rendering.md](docs/info/rendering.md) | The OpenGL pipeline: window, meshes, camera, draw calls, debug wireframes, the menu overlay |
+| [shaders.md](docs/info/shaders.md) | The vertex and fragment shaders, line by line |
+| [object-files.md](docs/info/object-files.md) | The CSV files that define apples, blocks, ground and trebuchet, and how they are checked |
 
 ## 🎯 Objectives
 
@@ -68,7 +68,7 @@ that implements each formula, and `docs/info/physics.md` explains the same tag.
 ## 📋 Function Overview
 
 <details>
-<summary><strong>ft_newton — modules breakdown</strong></summary>
+<summary><strong>ft_newton</strong></summary>
 
 <br>
 
@@ -137,6 +137,7 @@ that implements each formula, and `docs/info/physics.md` explains the same tag.
 make                                    # builds ./newton (and the vendored GLAD)
 make run                                # builds and runs with the default 1280x720
 make run ARGS="1920 1080"               # ... or at another size
+make valgrind                           # builds and runs under valgrind with the suppression files
 make clean && make re                   # object files, then a full rebuild
 make fclean                             # removes objects/ and the binary
 ```
@@ -205,15 +206,50 @@ start inside another body` when something already occupies the spawn point.
 ### Checking the work
 
 ```bash
-# The engine's own allocations: leaks reported inside the GL / GTK / Mesa
-# driver stack are suppressed, so what is left is the program's.
-valgrind --leak-check=full --show-leak-kinds=all \
-         --suppressions=docs/valgrind.supp ./newton
+# The engine's own allocations: what the window, toolkit and GL driver keep
+# until exit is suppressed, so what is left is the program's.
+make valgrind                           # any valgrind version
+
+# by hand, any version
+valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes \
+         --keep-debuginfo=yes --suppressions=docs/valgrind.supp ./newton
+# by hand, valgrind 3.22 or newer
+valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes \
+         --keep-debuginfo=yes --suppressions=docs/valgrind.supp \
+         --suppressions=docs/valgrind_recent.supp ./newton
 ```
 
-`docs/valgrind.supp` names the driver and toolkit stacks (fontconfig, pango,
-GTK/GDK, GLib, glycin, Mesa gallium, and the rest) that keep global state until
-process exit; nothing of `ft_newton` itself is suppressed.
+Two suppression files cover everything outside the project:
+
+| File | Valgrind | What it silences |
+|---|---|---|
+| `docs/valgrind.supp` | every version | Leaks from GLFW, X11 / xcb, Wayland, GTK / GDK / libdecor, GLib / GIO, fontconfig, pango, cairo, glycin, the GL driver (NVIDIA, Mesa, LLVM, EGL, GLX), libstdc++ and glibc's `dlopen`; the invalid reads in GIO's start-up and in the loader's `strncmp` |
+| `docs/valgrind_recent.supp` | 3.22 or newer | The NVIDIA EGL driver's zero-size `realloc` / `posix_memalign` at start-up (`ReallocZero`, `BadSize`) |
+
+None of these is project code. Every suppression matches on the library the
+allocation or the access happens in, never on a function of `srcs/`, so a leak
+of the engine is still reported. They are blocks that system libraries allocate
+once and keep for the life of the process: the display connection, the GTK
+toolkit that libdecor starts for window decorations on Wayland, fontconfig's
+font cache, the shader compiler and the LLVM JIT of the Mesa driver, the
+buffers glibc keeps for every library loaded with `dlopen`, and two `wl_proxy`
+objects that GLFW creates on Wayland and does not destroy in `glfwDestroyWindow`
+(a known GLFW bug). The program releases everything it owns in `game_shutdown`,
+including `glfwDestroyWindow` and `glfwTerminate`.
+
+The second file exists because valgrind refuses a whole suppression file that
+names an error kind it does not know, and `ReallocZero` / `BadSize` only exist
+since 3.21 / 3.22. `make valgrind` always loads the first file and adds the
+second only when the installed valgrind accepts it.
+
+`--keep-debuginfo=yes` is required: the Mesa driver is unloaded before the leak
+check, and without the flag its frames lose their library name and no
+suppression matches them. Quit through the menu or the window's close button,
+not `Ctrl+C`, so the cleanup runs. A clean run reports `definitely`,
+`indirectly`, `possibly lost` and `still reachable` at 0 bytes and
+`ERROR SUMMARY: 0 errors`, with everything else counted as `suppressed`; `-s`
+lists every suppression used. The library-by-library reasons are in
+[docs/README.md](docs/README.md#valgrind).
 
 There is no test suite: the program *is* the test bench. The loop that matters
 when a change lands is: build, `F1` to see the colliders, `T` to slow the time,
@@ -297,6 +333,7 @@ sudo apt install libglfw3-dev libgl1-mesa-dev
 ```bash
 make            # build ./newton (project sources, then glad/src/gl.c)
 make run        # build and run; ARGS="1280 720" is passed to the binary
+make valgrind   # build and run under valgrind with docs/*.supp; takes ARGS too
 make clean      # remove the objects/ directory
 make fclean     # clean + remove the binary
 make re         # fclean + build
@@ -366,7 +403,7 @@ fixed property order, so the files stay diff-friendly.
 ft_newton/
 │
 ├── README.md                             # Main project documentation
-├── Makefile                              # Build rules: ./newton, run, clean, fclean, re
+├── Makefile                              # Build rules: ./newton, run, valgrind, clean, fclean, re
 ├── .gitignore                            # objects/, the binary, editor files
 │
 ├── includes/
@@ -375,7 +412,8 @@ ft_newton/
 │
 ├── docs/
 │   ├── README.md                         # Condensed project documentation
-│   ├── valgrind.supp                     # Suppressions for the driver / toolkit stacks
+│   ├── valgrind.supp                     # Suppressions for everything outside the project, any valgrind
+│   ├── valgrind_recent.supp              # NVIDIA start-up errors only valgrind 3.22+ knows
 │   └── info/
 │       ├── architecture.md               # Files, the main loop, one physics step
 │       ├── physics.md                    # Every formula, tagged [F1] to [F26]
@@ -600,10 +638,6 @@ stacked with their gap, are fine.
 
 <br>
 
-The engine is the subject; the game is the way to exercise it with something
-that can be looked at. All of it goes through the same `World` the engine
-exposes to nothing else.
-
 ### The trebuchet
 
 Five **static** boxes read from `assets/trebuchet.csv`: a sill, two A-frame legs,
@@ -709,8 +743,8 @@ are eventually removed from the world and the counter.
   file and line, and a starting scene refused instead of repaired
 - **Immediate-mode UI on a 3D renderer**: a bitmap font, a batched vertex
   buffer, and a hit-test that runs on the same rectangles the layout produced
-- **Checking your own work**: wireframes, pause, slow motion and valgrind with a
-  suppression file that names exactly what the driver stack is allowed to leak
+- **Checking your own work**: wireframes, pause, slow motion and valgrind with
+  suppression files that name exactly what the driver stack is allowed to leak
 
 ## ⚙️ Technical Specifications
 
@@ -754,8 +788,10 @@ are eventually removed from the world and the counter.
   deltas) only grow with the body count. The single allocation of a physics step
   is the broad-phase sweep array, freed before the solver runs; every path
   releases through `game_shutdown`
-- **Verification**: `docs/valgrind.supp` suppresses only the GL / GTK / Mesa
-  driver stacks, so what valgrind reports is the program's own memory
+- **Verification**: `make valgrind` with `docs/valgrind.supp` (and
+  `docs/valgrind_recent.supp` on valgrind 3.22+), which suppress only the
+  window, toolkit, GL driver and runtime libraries, so what valgrind
+  reports is the program's own memory
 
 ## 🔧 Requirements
 
@@ -765,6 +801,7 @@ are eventually removed from the world and the counter.
 - A desktop session: the program opens a window and repeatedly draws into it
 - Nothing else to install: GLAD is committed in `glad/`, and the shaders and the
   object files are read from the repository, so run the binary from its root
+- Optional: `valgrind` (any version) for `make valgrind`
 
 ---
 

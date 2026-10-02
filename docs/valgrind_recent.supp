@@ -1,0 +1,22 @@
+# ============================================================================
+# ft_newton valgrind suppressions for valgrind >= 3.22. The ReallocZero (3.21)
+# and BadSize (3.22) error kinds do not exist in older versions, which refuse
+# the whole file with "unknown tool suppression type", so they cannot live in
+# valgrind.supp. `make valgrind` adds this file only when the installed
+# valgrind accepts it; valgrind.supp is always loaded.
+# ============================================================================
+
+# ---- NVIDIA EGL driver start-up: zero-size realloc / posix_memalign calls
+# made while the driver initialises, reported as errors, not leaks ----
+{
+   newton_nvidia_realloc_zero
+   Memcheck:ReallocZero
+   fun:realloc
+   obj:*/libnvidia-eglcore.so*
+}
+{
+   newton_nvidia_memalign_zero
+   Memcheck:BadSize
+   fun:posix_memalign
+   obj:*/libnvidia-eglcore.so*
+}

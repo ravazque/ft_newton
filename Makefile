@@ -11,6 +11,16 @@ GLADFLAGS = -g3 -O3
 
 ARGS     =
 
+VALGRIND      = valgrind
+SUPP          = docs/valgrind.supp
+SUPP_RECENT   = docs/valgrind_recent.supp
+# Expanded only by `make valgrind`: the recent file is added when this valgrind accepts it.
+SUPPFLAGS     = --suppressions=$(SUPP) \
+                $(shell $(VALGRIND) --suppressions=$(SUPP_RECENT) true >/dev/null 2>&1 \
+                    && echo --suppressions=$(SUPP_RECENT))
+VALGRINDFLAGS = --leak-check=full --show-leak-kinds=all --track-origins=yes \
+                --keep-debuginfo=yes $(SUPPFLAGS)
+
 SRCS = main.c \
        math/vec3.c math/scalar.c math/mat3.c math/mat4.c math/quat.c \
        physics/rigidbody.c physics/inertia.c physics/integrator.c physics/world.c physics/sleep.c physics/cull.c \
@@ -50,6 +60,10 @@ $(OBJDIR)/%.o: %.c
 run: all
 	./$(NAME) $(ARGS)
 
+# docs/valgrind.supp, plus docs/valgrind_recent.supp on valgrind >= 3.22.
+valgrind: all
+	$(VALGRIND) $(VALGRINDFLAGS) ./$(NAME) $(ARGS)
+
 clean:
 	rm -rf $(OBJDIR)
 
@@ -58,6 +72,6 @@ fclean: clean
 
 re: fclean all
 
-.PHONY: all run clean fclean re
+.PHONY: all run valgrind clean fclean re
 
 -include $(DEPS)

@@ -43,6 +43,7 @@ Arch-based systems: `sudo pacman -S --needed glfw mesa`. Debian/Ubuntu: `sudo ap
 ```bash
 make          # builds ./newton
 make run      # builds and runs (optionally: make run ARGS="1280 720")
+make valgrind # builds and runs under valgrind with the suppression files (accepts ARGS too)
 make clean    # removes the object files
 make fclean   # removes the object files and the binary
 make re       # rebuilds from scratch
@@ -51,6 +52,58 @@ make re       # rebuilds from scratch
 `./newton [width height]` opens a window of that size (720x480 to 2560x1440). Run it from the repository root so `shaders/` and `assets/` are found.
 
 The main loop is capped at 30 frames per second (`FPS_CAP`); the physics does not depend on it and always advances in fixed steps of 1/120 s.
+
+## Valgrind
+
+The window, the input and the OpenGL driver come from system libraries that allocate global state, keep it for the whole process and never free it before exit. Run bare, valgrind buries any real problem under thousands of their blocks. Two suppression files in `docs/` silence **only code outside the project**; a leak or an invalid access whose stack goes through `srcs/` is still reported.
+
+| File | Valgrind | Contents |
+|---|---|---|
+| [valgrind.supp](valgrind.supp) | every version | Every library listed below, using only the error kinds all versions know (`Leak`, `Addr8`, `Addr16`, `Addr32`) |
+| [valgrind_recent.supp](valgrind_recent.supp) | 3.22 or newer | The two NVIDIA start-up errors whose kinds (`ReallocZero`, `BadSize`) only exist since 3.21 / 3.22 |
+
+They are separate because valgrind refuses a whole suppression file that names an unknown error kind (`unknown tool suppression type`): a single file with the new kinds would not load on an older valgrind.
+
+### Running
+
+```bash
+make valgrind                  # builds, picks the right files and runs
+make valgrind ARGS="1280 720"  # same, with a window size
+
+# by hand, any valgrind version
+valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes \
+         --keep-debuginfo=yes --suppressions=docs/valgrind.supp ./newton
+
+# by hand, valgrind 3.22 or newer
+valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes \
+         --keep-debuginfo=yes --suppressions=docs/valgrind.supp \
+         --suppressions=docs/valgrind_recent.supp ./newton
+```
+
+`make valgrind` always loads `valgrind.supp` and adds `valgrind_recent.supp` only when the installed valgrind accepts it, so the same command works on every version.
+
+- `--keep-debuginfo=yes` is required. The Mesa driver is loaded with `dlopen` and unloaded before the leak check; without the flag its frames lose their library name and show up as `???`, and no suppression can match them.
+- Close the program normally (`ESC` and **Quit**, or the window's close button). `Ctrl+C` skips the cleanup and every block of the engine shows up as lost.
+- A clean run ends with `definitely lost: 0`, `indirectly lost: 0`, `possibly lost: 0`, `still reachable: 0` and `ERROR SUMMARY: 0 errors`; everything else is counted as `suppressed`.
+- `-s` lists, at the end of the report, every suppression used and how many bytes or errors it covered.
+
+### What is suppressed, and why it is not project code
+
+Every entry matches on the library the allocation or the access happens in (`obj:*/lib...so*`) or on a glibc loader function, never on a project function. The program frees everything it allocates in `game_shutdown`, and calls `glfwDestroyWindow` and `glfwTerminate`; what remains belongs to the libraries below.
+
+| Source | Reported as | Why |
+|---|---|---|
+| GLFW | definitely lost (2 × 192 B) | On Wayland, `glfwCreateWindow` creates two `wl_proxy` objects (viewporter, fractional scale) that `glfwDestroyWindow` never destroys: a known GLFW bug |
+| Wayland (client, cursor, egl), X11, xcb | still reachable | The display connection, cursor themes and protocol caches live until the process exits |
+| GTK / GDK / libdecor, cairo, pango, harfbuzz, fribidi | still reachable, possibly lost | Window decorations on Wayland are drawn by libdecor through GTK, which initialises a full toolkit and never tears it down |
+| GLib / GObject / GIO, gmodule, libffi, dconf | still reachable, invalid read | Type system, settings and D-Bus state created by `gtk_init`; GIO also performs an invalid read while reading its settings at start-up |
+| fontconfig | definitely lost | The global font cache GTK loads; fontconfig only releases it in `FcFini`, which nothing calls |
+| glycin, gdk-pixbuf | possibly lost, still reachable | GTK's image loader runs detached threads and async executors that are still alive at exit |
+| NVIDIA driver (`libnvidia-*`) | definitely lost, still reachable | Driver state kept until exit |
+| NVIDIA EGL driver (`libnvidia-eglcore`) | `ReallocZero`, `BadSize` (valgrind 3.22+) | Zero-size `realloc` / `posix_memalign` calls while the driver initialises |
+| Mesa: gallium, DRI drivers, LLVM (llvmpipe), EGL, GLX, GLdispatch, glapi, libdrm | definitely lost, still reachable | The shader compiler, the software rasteriser and its LLVM JIT keep their state for the life of the process |
+| libstdc++ | still reachable (72,704 B) | The emergency exception pool the C++ runtime allocates when the driver loads it, by design |
+| glibc dynamic loader | still reachable, invalid read of size 8 | Buffers `dlopen` keeps for every library the GL stack loads at run time; its word-at-a-time `strncmp` reads past the end of an rpath string while expanding it |
 
 ## Controls
 
@@ -113,4 +166,5 @@ srcs/utils/       command-line arguments
 shaders/          basic.vert / basic.frag (GLSL 3.30 core)
 assets/           the object definition files (CSV)
 glad/             OpenGL function loader
+docs/             this README, info/ (the detailed documents), the valgrind suppression files
 ```
