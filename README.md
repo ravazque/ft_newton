@@ -262,7 +262,13 @@ vendored GLAD is compiled with the relaxed flag set.
 
 </details>
 
-## 🎮 Controls
+
+<details>
+<summary><strong>Controls</strong></summary>
+
+<br>
+
+### Controls
 
 The keys act on the running simulation immediately; the mouse and the keyboard
 both drive the menu when it is open.
@@ -300,6 +306,10 @@ boxes grown by the apple's radius.
 Structures always appear at the same spot. When that spot is taken, the whole
 structure is lifted until no block would sink into what is there and it lands on
 top of it, so no body ever starts inside another one.
+
+<br>
+
+</details>
 
 ## 🚀 Installation & Structure
 
