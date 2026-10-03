@@ -365,7 +365,7 @@ Each object is one small CSV file in `assets/`, named by its first row:
 shape,sphere,,
 radius,0.5,,
 mass,2,,
-rolling_resistance,0.3,,
+rolling_resistance,0.15,,
 friction,0.4,,
 elasticity,0.45,,
 color,0.85,0.25,0.25
@@ -780,7 +780,7 @@ are eventually removed from the world and the counter.
   `file:line: reason`, and no default value anywhere
 - **Window**: 1280x720 by default, accepted sizes 720x480 to 2560x1440, frame
   cap 30 FPS with the simulation independent of it, title readout every 0.2 s
-- **Overlay**: one vertex buffer of 196 608 floats (6 per vertex, position +
+- **Overlay**: one vertex buffer of 196 608 vertices (6 floats each, position +
   colour), enough for the whole menu in one draw call
 - **Memory**: nothing per body on the GPU — three meshes serve the whole scene —
   and the CPU containers (bodies, pairs, contacts, warm-start memory and the
