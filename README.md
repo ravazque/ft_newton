@@ -28,6 +28,17 @@ camera flies freely through the scene at any time. The simulation runs on a
 fixed 120 Hz step whatever the display rate is, and the time scale changes how
 many steps a frame runs, never their size.
 
+<details>
+<summary><strong>🖼️ Screenshots</strong></summary>
+
+<br>
+
+<p align="center">
+  <img src="docs/img/newton.gif" alt="An apple fired at the pyramid, then a wall dropped on top of it" width="820">
+</p>
+
+<p align="center"><sub>An apple from the trebuchet hits the pyramid, a 6x6 wall (<code>1</code>) is dropped on top of it and partly topples, and a second apple flies into the pile.</sub></p>
+
 Everything is documented: the source carries a tag such as `[F21]` on the line
 that implements each formula, and `docs/info/physics.md` explains the same tag.
 
@@ -39,6 +50,10 @@ that implements each formula, and `docs/info/physics.md` explains the same tag.
 | [rendering.md](docs/info/rendering.md) | The OpenGL pipeline: window, meshes, camera, draw calls, debug wireframes, the menu overlay |
 | [shaders.md](docs/info/shaders.md) | The vertex and fragment shaders, line by line |
 | [object-files.md](docs/info/object-files.md) | The CSV files that define apples, blocks, ground and trebuchet, and how they are checked |
+
+<br>
+
+</details>
 
 ## 🎯 Objectives
 
@@ -134,22 +149,23 @@ that implements each formula, and `docs/info/physics.md` explains the same tag.
 ### Build and run
 
 ```bash
-make                                    # builds ./newton (and the vendored GLAD)
-make run                                # builds and runs with the default 1280x720
-make run ARGS="1920 1080"               # ... or at another size
-make valgrind                           # builds and runs under valgrind with the suppression files
-make clean && make re                   # object files, then a full rebuild
-make fclean                             # removes objects/ and the binary
+make install                # checks the compiler, pkg-config, GLFW and OpenGL
+make                        # builds ./newton (and the vendored GLAD)
+make run                    # builds and runs with the default 1280x720
+make run ARGS="1920 1080"   # ... or at another size
+make valgrind               # builds and runs under valgrind with the suppression files
+make clean && make re       # object files, then a full rebuild
+make fclean                 # removes objects/ and the binary
 ```
 
-Run it **from the repository root**: `shaders/` and `assets/` are opened by
-relative path, and a missing one is fatal.
+The program runs **from the repository root**: `shaders/` and `assets/` are
+opened by relative path, and a missing one is fatal.
 
 ```bash
-./newton                # window of 1280x720
-./newton 2560 1440      # the largest accepted size
-./newton 100 100        # out of range: warns and falls back to 1280x720
-./newton 800            # wrong argument count: prints the usage and exits 1
+./newton             # window of 1280x720
+./newton 2560 1440   # the largest accepted size
+./newton 100 100     # out of range: warns and falls back to 1280x720
+./newton 800         # wrong argument count: prints the usage and exits 1
 ```
 
 ### What the window shows
@@ -165,11 +181,17 @@ in the shape below — the values are the ones a fresh run reports:
 ft_newton  |  FPS: nn  |  objects: n  |  g: -9.81  |  time: x1.00  |  speed: 11.0 m/s  |  angle: 25 deg  |  mass: 2.00 kg  |  PAUSED
 ```
 
-Fire an apple with `SPACE` and watch it: the parabola is not scripted, the apple
-is an ordinary rigid body from its first step. Spawn a wall with `1` and hit it;
-the blocks tip, slide, pile up and finally switch off as one sleeping island.
+`SPACE` fires an apple whose parabola is not scripted: the apple is an ordinary
+rigid body from its first step. A wall spawned with `1` and hit by it tips,
+slides, piles up and finally switches off as one sleeping island.
 `F1` shows the colliders that produce all of it, `T` slows the time down to see a
 single impact step by step, `P` freezes a contact to look at it from any angle.
+
+<p align="center">
+  <img src="docs/img/colliders.png" alt="F1: collider wireframes over the scene" width="760">
+</p>
+
+<p align="center"><sub>The debug display (<code>F1</code>): every collider drawn as a yellow wireframe over the scene, slightly inflated (the ground plane slightly lifted), so the lines show the shape the collision code tests, not the mesh.</sub></p>
 
 ### Refusals and error handling
 
@@ -208,7 +230,7 @@ start inside another body` when something already occupies the spawn point.
 ```bash
 # The engine's own allocations: what the window, toolkit and GL driver keep
 # until exit is suppressed, so what is left is the program's.
-make valgrind                           # any valgrind version
+make valgrind                                                              # any valgrind version
 
 # by hand, any version
 valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes \
@@ -244,8 +266,8 @@ second only when the installed valgrind accepts it.
 
 `--keep-debuginfo=yes` is required: the Mesa driver is unloaded before the leak
 check, and without the flag its frames lose their library name and no
-suppression matches them. Quit through the menu or the window's close button,
-not `Ctrl+C`, so the cleanup runs. A clean run reports `definitely`,
+suppression matches them. The cleanup runs when the program closes through the
+menu or the window's close button; `Ctrl+C` skips it. A clean run reports `definitely`,
 `indirectly`, `possibly lost` and `still reachable` at 0 bytes and
 `ERROR SUMMARY: 0 errors`, with everything else counted as `suppressed`; `-s`
 lists every suppression used. The library-by-library reasons are in
@@ -341,6 +363,7 @@ sudo apt install libglfw3-dev libgl1-mesa-dev
 ### Make targets
 
 ```bash
+make install    # check the compiler, pkg-config, GLFW and OpenGL
 make            # build ./newton (project sources, then glad/src/gl.c)
 make run        # build and run; ARGS="1280 720" is passed to the binary
 make valgrind   # build and run under valgrind with docs/*.supp; takes ARGS too
@@ -412,112 +435,116 @@ fixed property order, so the files stay diff-friendly.
 ```
 ft_newton/
 │
-├── README.md                             # Main project documentation
-├── Makefile                              # Build rules: ./newton, run, valgrind, clean, fclean, re
-├── .gitignore                            # objects/, the binary, editor files
+├── README.md                       # Main project documentation
+├── Makefile                        # Build rules: ./newton, run, valgrind, clean, fclean, re
+├── .gitignore                      # objects/, the binary, editor files
 │
 ├── includes/
-│   ├── newton.h                          # The only header: every type, then every prototype
-│   └── defines.h                         # Every constant, with its unit, and nothing hidden in a .c
+│   ├── newton.h                    # The only header: every type, then every prototype
+│   └── defines.h                   # Every constant, with its unit, and nothing hidden in a .c
 │
 ├── docs/
-│   ├── README.md                         # Condensed project documentation
-│   ├── valgrind.supp                     # Suppressions for everything outside the project, any valgrind
-│   ├── valgrind_recent.supp              # NVIDIA start-up errors only valgrind 3.22+ knows
-│   └── info/
-│       ├── architecture.md               # Files, the main loop, one physics step
-│       ├── physics.md                    # Every formula, tagged [F1] to [F26]
-│       ├── collisions.md                 # Broad-phase, narrow-phase, response, classic problems
-│       ├── rendering.md                  # Window, meshes, camera, draw calls, overlay
-│       ├── shaders.md                    # The two shaders, line by line
-│       └── object-files.md               # The CSV format and its checks
+│   ├── README.md                   # Condensed project documentation
+│   ├── valgrind.supp               # Suppressions for everything outside the project, any valgrind
+│   ├── valgrind_recent.supp        # NVIDIA start-up errors only valgrind 3.22+ knows
+│   ├── info/
+│   │   ├── architecture.md         # Files, the main loop, one physics step
+│   │   ├── physics.md              # Every formula, tagged [F1] to [F26]
+│   │   ├── collisions.md           # Broad-phase, narrow-phase, response, classic problems
+│   │   ├── rendering.md            # Window, meshes, camera, draw calls, overlay
+│   │   ├── shaders.md              # The two shaders, line by line
+│   │   └── object-files.md         # The CSV format and its checks
+│   └── img/
+│       ├── newton.gif              # An apple, a wall and a second apple, recorded from the window
+│       ├── colliders.png           # F1 debug display, collider wireframes
+│       └── bonus.png               # The ESC menu
 │
-├── assets/                               # The object definitions (CSV)
-│   ├── apples.csv                        # Sphere: radius, mass, rolling resistance, material, colour
-│   ├── block.csv                         # Box: size, mass, material, colour
-│   ├── ground.csv                        # Plane: normal, offset, extent, material, colour
-│   └── trebuchet.csv                     # Position, base, frame, arm, counterweight, launch settings
+├── assets/                         # The object definitions (CSV)
+│   ├── apples.csv                  # Sphere: radius, mass, rolling resistance, material, colour
+│   ├── block.csv                   # Box: size, mass, material, colour
+│   ├── ground.csv                  # Plane: normal, offset, extent, material, colour
+│   └── trebuchet.csv               # Position, base, frame, arm, counterweight, launch settings
 │
 ├── shaders/
-│   ├── basic.vert                        # GLSL 3.30 core: the MVP chain, the world normal
-│   └── basic.frag                        # Three modes: lit, flat, and one colour per vertex
+│   ├── basic.vert                  # GLSL 3.30 core: the MVP chain, the world normal
+│   └── basic.frag                  # Three modes: lit, flat, and one colour per vertex
 │
-├── glad/                                 # OpenGL 3.3 Core loader, generated, committed
-│   ├── include/glad/gl.h                 # The GL function pointers
-│   ├── include/KHR/khrplatform.h         # The types those pointers use
-│   └── src/gl.c                          # The loader implementation
+├── glad/                           # OpenGL 3.3 Core loader, generated, committed
+│   ├── include/glad/gl.h           # The GL function pointers
+│   ├── include/KHR/khrplatform.h   # The types those pointers use
+│   └── src/gl.c                    # The loader implementation
 │
 └── srcs/
-    ├── main.c                            # game_init -> game_run -> game_shutdown
+    ├── main.c                      # game_init -> game_run -> game_shutdown
     │
     ├── math/
-    │   ├── vec3.c                        # Vectors: add, dot, cross, length, normalise
-    │   ├── scalar.c                      # clampf, shared by collision, solver and menu
-    │   ├── mat3.c                        # Inertia tensors: inverse, transpose, from a quaternion
-    │   ├── mat4.c                        # Rendering matrices: transform, perspective, look-at
-    │   └── quat.c                        # Quaternions: rotate, compose, shortest arc, integrate
+    │   ├── vec3.c                  # Vectors: add, dot, cross, length, normalise
+    │   ├── scalar.c                # clampf, shared by collision, solver and menu
+    │   ├── mat3.c                  # Inertia tensors: inverse, transpose, from a quaternion
+    │   ├── mat4.c                  # Rendering matrices: transform, perspective, look-at
+    │   └── quat.c                  # Quaternions: rotate, compose, shortest arc, integrate
     │
     ├── physics/
-    │   ├── rigidbody.c                   # Mass, forces, torque, impulses at a point
-    │   ├── inertia.c                     # Sphere and box tensors, and their world-space form
-    │   ├── integrator.c                  # One semi-implicit Euler step, damping, orientation
-    │   ├── world.c                       # The body array, the scratch arrays, world_step
-    │   ├── sleep.c                       # Contact islands and the decision to sleep
-    │   └── cull.c                        # Removal of bodies that flew away or fell off the edge
+    │   ├── rigidbody.c             # Mass, forces, torque, impulses at a point
+    │   ├── inertia.c               # Sphere and box tensors, and their world-space form
+    │   ├── integrator.c            # One semi-implicit Euler step, damping, orientation
+    │   ├── world.c                 # The body array, the scratch arrays, world_step
+    │   ├── sleep.c                 # Contact islands and the decision to sleep
+    │   └── cull.c                  # Removal of bodies that flew away or fell off the edge
     │
     ├── collision/
-    │   ├── collider.c                    # The three shapes, the bounded plane, every AABB
-    │   ├── broadphase.c                  # Sweep and prune over the sorted AABBs
-    │   ├── narrowphase.c                 # Pair dispatch, normal orientation, contact collection
-    │   ├── contact_sphere.c              # Sphere against sphere, plane and box
-    │   ├── contact_box.c                 # Box against plane, and box against box
-    │   ├── obb.c                         # Oriented-box helpers: axes, radius, corners, support edge
-    │   ├── sat.c                         # The separating axis test on 15 axes
-    │   ├── manifold.c                    # Face clipping and the reduction to four spread points
-    │   └── query.c                       # Touching? overlapping? is this spot free?
+    │   ├── collider.c              # The three shapes, the bounded plane, every AABB
+    │   ├── broadphase.c            # Sweep and prune over the sorted AABBs
+    │   ├── narrowphase.c           # Pair dispatch, normal orientation, contact collection
+    │   ├── contact_sphere.c        # Sphere against sphere, plane and box
+    │   ├── contact_box.c           # Box against plane, and box against box
+    │   ├── obb.c                   # Oriented-box helpers: axes, radius, corners, support edge
+    │   ├── sat.c                   # The separating axis test on 15 axes
+    │   ├── manifold.c              # Face clipping and the reduction to four spread points
+    │   └── query.c                 # Touching? overlapping? is this spot free?
     │
     ├── response/
-    │   ├── resolver.c                    # Wake, prepare, warm start, iterate, correct, remember
-    │   ├── impulse.c                     # Normal, friction and rolling impulses of one contact
-    │   └── correction.c                  # Removal of the overlap the impulses left
+    │   ├── resolver.c              # Wake, prepare, warm start, iterate, correct, remember
+    │   ├── impulse.c               # Normal, friction and rolling impulses of one contact
+    │   └── correction.c            # Removal of the overlap the impulses left
     │
     ├── render/
-    │   ├── window.c                      # GLFW window, OpenGL 3.3 Core context, input queries
-    │   ├── shader.c                      # Compiling, linking and the uniforms
-    │   ├── mesh.c                        # The unit cube, sphere and plane on the GPU
-    │   ├── camera.c                      # Free-flying eye, view and projection
-    │   ├── renderer.c                    # Per-frame setup, draw calls, body model and mesh
-    │   ├── debugdraw.c                   # The collider wireframes (F1)
-    │   ├── font.c                        # The 8x8 bitmap font for ASCII 32..126
-    │   └── ui.c                          # The batched 2D overlay: rectangles and text
+    │   ├── window.c                # GLFW window, OpenGL 3.3 Core context, input queries
+    │   ├── shader.c                # Compiling, linking and the uniforms
+    │   ├── mesh.c                  # The unit cube, sphere and plane on the GPU
+    │   ├── camera.c                # Free-flying eye, view and projection
+    │   ├── renderer.c              # Per-frame setup, draw calls, body model and mesh
+    │   ├── debugdraw.c             # The collider wireframes (F1)
+    │   ├── font.c                  # The 8x8 bitmap font for ASCII 32..126
+    │   └── ui.c                    # The batched 2D overlay: rectangles and text
     │
     ├── menu/
-    │   ├── menu.c                        # Rows, sections, buttons and stepping a value
-    │   ├── menu_layout.c                 # The 75% panel and the rectangle of every row
-    │   ├── menu_input.c                  # Hover, click, hold-to-repeat and the keyboard
-    │   └── menu_draw.c                   # Panel, title line and rows, into the overlay
+    │   ├── menu.c                  # Rows, sections, buttons and stepping a value
+    │   ├── menu_layout.c           # The 75% panel and the rectangle of every row
+    │   ├── menu_input.c            # Hover, click, hold-to-repeat and the keyboard
+    │   └── menu_draw.c             # Panel, title line and rows, into the overlay
     │
     ├── data/
-    │   ├── csvfile.c                     # The strict reader of the object files
-    │   ├── csv_values.c                  # Typed getters, unknown-property and range checks
-    │   ├── objectdef.c                   # Definition <-> body, and saving the file back
-    │   └── trebuchet_file.c              # The trebuchet file: load, check, save
+    │   ├── csvfile.c               # The strict reader of the object files
+    │   ├── csv_values.c            # Typed getters, unknown-property and range checks
+    │   ├── objectdef.c             # Definition <-> body, and saving the file back
+    │   └── trebuchet_file.c        # The trebuchet file: load, check, save
     │
     ├── game/
-    │   ├── game.c                        # Start-up, the main loop, the frame cap, shut-down
-    │   ├── draw.c                        # Bodies, aim bar, wireframes, menu and title
-    │   ├── input.c                       # Every key the game reads
-    │   ├── hud.c                         # FPS, counters and live values in the title
-    │   ├── scene.c                       # Loading the four files, the checked starting scene
-    │   ├── actions.c                     # Apply, reload, save, reset, resume, quit
-    │   ├── menu_rows.c                   # What the menu contains
-    │   ├── trebuchet.c                   # The five boxes of the machine and the shot
-    │   ├── trebuchet_clearance.c         # How far past the arm tip an apple must appear
-    │   ├── projectile.c                  # An apple with its launch velocity and mass
-    │   └── structure.c                   # Walls, pyramids and towers, lifted onto what is there
+    │   ├── game.c                  # Start-up, the main loop, the frame cap, shut-down
+    │   ├── draw.c                  # Bodies, aim bar, wireframes, menu and title
+    │   ├── input.c                 # Every key the game reads
+    │   ├── hud.c                   # FPS, counters and live values in the title
+    │   ├── scene.c                 # Loading the four files, the checked starting scene
+    │   ├── actions.c               # Apply, reload, save, reset, resume, quit
+    │   ├── menu_rows.c             # What the menu contains
+    │   ├── trebuchet.c             # The five boxes of the machine and the shot
+    │   ├── trebuchet_clearance.c   # How far past the arm tip an apple must appear
+    │   ├── projectile.c            # An apple with its launch velocity and mass
+    │   └── structure.c             # Walls, pyramids and towers, lifted onto what is there
     │
     └── utils/
-        └── start_check.c                 # The optional [width height] arguments
+        └── start_check.c           # The optional [width height] arguments
 ```
 
 `includes/newton.h` is the only header: every type, then every prototype grouped
@@ -704,7 +731,7 @@ gravity and the time scale back to their defaults.
 | **Resume** | Closes the menu and unpauses |
 | **Quit** | Leaves the loop and frees everything |
 
-Click `[-]` / `[+]` and hold to repeat (after 0.35 s, every 0.06 s); the mouse
+`[-]` / `[+]` change a value per click and repeat while held (after 0.35 s, every 0.06 s); the mouse
 highlights rows and buttons, the arrows move the selection, the left and right
 arrows change the selected value, and `ENTER` presses the selected button. The
 whole panel — panel, text, buttons and states — is drawn by the engine's own 2D
@@ -718,6 +745,39 @@ call.
 body it describes. It is the view that shows why a pile holds: the ground's
 wireframe is exactly the square that supports bodies, and past it they fall and
 are eventually removed from the world and the counter.
+
+<br>
+
+</details>
+
+<details>
+<summary><strong>🍎 Bonus</strong></summary>
+
+<br>
+
+The bonus is a GUI for the engine: a menu with every tunable value of the
+simulation.
+
+<p align="center">
+  <img src="docs/img/bonus.png" alt="The ESC menu" width="760">
+</p>
+
+### The menu — `ESC`
+
+`ESC` pauses the simulation and opens a panel with every tunable value, the
+controls and the actions, drawn by the engine's own 2D overlay in a single draw
+call. The panel edits a **draft**, never the running simulation: values reach
+the world only on **Apply**.
+
+- **Values**: gravity and time scale; launch speed and angle; mass, friction,
+  elasticity and rolling resistance of the apples; mass, friction and
+  elasticity of the blocks; friction and elasticity of the ground and the
+  trebuchet.
+- **Actions**: **Apply** the draft, **Reload from files** (`assets/*.csv`),
+  **Save to files** without applying, **Reset simulation**, **Resume**, **Quit**.
+
+The details of the draft, the buttons and the keyboard navigation are under
+**The menu** in *The game layer* above.
 
 <br>
 
