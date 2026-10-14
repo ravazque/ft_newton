@@ -57,6 +57,13 @@ $(OBJDIR)/%.o: %.c
 	mkdir -p $(dir $@)
 	$(CC) $(GLADFLAGS) $(CPPFLAGS) -MMD -MP -c $< -o $@
 
+install:
+	@command -v $(CC) >/dev/null || { echo "$(CC) not found: install gcc or clang" >&2; exit 1; }
+	@command -v pkg-config >/dev/null || { echo "pkg-config not found: install pkg-config" >&2; exit 1; }
+	@pkg-config --exists glfw3 || { echo "GLFW 3 not found: install libglfw3-dev (Debian/Ubuntu) or glfw (Arch)" >&2; exit 1; }
+	@pkg-config --exists gl || { echo "OpenGL not found: install libgl1-mesa-dev (Debian/Ubuntu) or mesa (Arch)" >&2; exit 1; }
+	@echo "dependencies ready: make run"
+
 run: all
 	./$(NAME) $(ARGS)
 
@@ -72,6 +79,15 @@ fclean: clean
 
 re: fclean all
 
-.PHONY: all run valgrind clean fclean re
+help:
+	@echo "make           build ./newton"
+	@echo "make install   check the compiler, pkg-config, GLFW and OpenGL"
+	@echo "make run       build and run ./newton $(ARGS)"
+	@echo "make valgrind  build and run under valgrind with docs/*.supp"
+	@echo "make clean     remove the objects"
+	@echo "make fclean    remove the objects and the binary"
+	@echo "make re        fclean, then build"
+
+.PHONY: all help install run valgrind clean fclean re
 
 -include $(DEPS)
