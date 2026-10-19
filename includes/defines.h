@@ -205,6 +205,8 @@
 # define GRAVITY_MIN             (-40.0f)
 # define GRAVITY_MAX             20.0f
 # define FRICTION_MAX            20.0f
+# define BODY_SIZE_MIN           0.1f                                 // m, a block side
+# define BODY_SIZE_MAX           6.0f                                 // m, a block side or an apple diameter
 # define ROLLING_RESISTANCE_MAX  1.0f
 # define RAGDOLL_MASS_MIN        1.0f
 # define RAGDOLL_MASS_MAX        200.0f

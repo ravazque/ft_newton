@@ -119,7 +119,7 @@ The launch values are set with `I` `K` (angle) and `J` `L` (speed), or in the me
 | Mesh colliders | `7` `8` to choose, `6` to place, `9` for the rain, `F1` | The balls rest on the exact surface: between the humanoid's legs, through the hole of the torus, in the openings of the logo |
 | Camera | `W` `A` `S` `D` `R` `F` into any body | The camera stops at the surface or slides along it; a body dropped on it pushes it out |
 | Starting scene | `assets/trebuchet.csv` with `position,0,6,33.7` | `assets/trebuchet.csv: the camera would start inside the trebuchet at (0, 8.75, 33.7)` and exit status 1 |
-| Object file | `assets/block.csv` with `mass,-1,,` | `assets/block.csv:4: 'mass' must be positive` and exit status 1 |
+| Object file | `assets/block.csv` with `mass,-1,,` | `assets/block.csv:4: 'mass' must be within [0.1, 50]` and exit status 1 |
 | Reload | the same edits, then **Reload from files** in the menu | The same messages, then `Reload aborted: the object files above need fixing`; the running scene is kept |
 
 ## Bonus

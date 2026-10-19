@@ -56,13 +56,13 @@ static void	validate(const ObjectDef *def, CsvFile *csv)
 {
 	if (def->shape == SHAPE_SPHERE)
 	{
-		csv_expect_min(csv, "radius", def->radius, PROJECTILE_RADIUS_MIN);
+		csv_expect_range(csv, "radius", def->radius, PROJECTILE_RADIUS_MIN, BODY_SIZE_MAX * 0.5f);
 		csv_expect_range(csv, "rolling_resistance", def->rollingResistance, 0.0f, ROLLING_RESISTANCE_MAX);
 	}
 	if (def->shape == SHAPE_BOX)
-		csv_expect_positive_vec3(csv, "size", def->size);
+		csv_expect_range_vec3(csv, "size", def->size, BODY_SIZE_MIN, BODY_SIZE_MAX);
 	if (def->shape == SHAPE_SPHERE || def->shape == SHAPE_BOX)
-		csv_expect_positive(csv, "mass", def->mass);
+		csv_expect_range(csv, "mass", def->mass, PROJECTILE_MASS_MIN, PROJECTILE_MASS_MAX);
 	if (def->shape == SHAPE_PLANE)
 	{
 		csv_expect_positive(csv, "extent", def->extent);
@@ -74,7 +74,7 @@ static void	validate(const ObjectDef *def, CsvFile *csv)
 		csv_expect_range(csv, "size", def->modelSize, MODEL_SIZE_MIN, MODEL_SIZE_MAX);
 		csv_expect_range(csv, "density", def->density, MODEL_DENSITY_MIN, MODEL_DENSITY_MAX);
 	}
-	csv_expect_min(csv, "friction", def->friction, 0.0f);
+	csv_expect_range(csv, "friction", def->friction, 0.0f, FRICTION_MAX);
 	csv_expect_range(csv, "elasticity", def->elasticity, 0.0f, 1.0f);
 	csv_expect_range_vec3(csv, "color", def->color, 0.0f, 1.0f);
 }

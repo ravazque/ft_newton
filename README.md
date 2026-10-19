@@ -301,14 +301,14 @@ the starting pyramid.
 | Gravity | `0`, then `SPACE`; `G` `B` | Without gravity the apple flies in a straight line and nothing falls; `0` again restores the previous value (-9.81 m/s² at start); any value from -40 to 20 m/s² applies at once and wakes every body |
 | Slow motion | `T` down to 0.1, `P` | Time runs ten times slower, the step stays 1/120 s; pause freezes it |
 | Masses | `E` up to 50 kg, then `Q` down to 0.1 kg, with the default shot | The 50 kg apple scatters the starting pyramid (blocks thrown up to 13 m); the 0.1 kg apple bounces back at about 3 m/s and moves no block |
-| Fast projectile | 60 m/s at -30° against the ragdoll or a model, at -15° against the starting pyramid | No tunnelling: the apple never passes through what it hits; its radius is at least 0.25 m, so even at 60 m/s it moves no more than its diameter per step |
+| Fast projectile | 60 m/s at -30° against the ragdoll or a model, at -15° against the starting pyramid | No tunnelling: the apple never passes through what it hits; its radius is at least 0.25 m, so even at 60 m/s it moves no more than its diameter per step; every other body (a rain ball thrown by a 50 kg apple) has its speed clamped to its own thinnest dimension per step |
 | Many objects | `4` several times, `9` | 150 blocks per wall, 196 balls per rain, the frame rate and the object count in the title; measured on a desktop processor, about 900 bodies keep the average step under the 8.3 ms of real time |
 | Wireframes | `F1` | Every collider in yellow and every contact in red with its normal in cyan |
 | Ragdoll | `5`, then `SPACE` at -10° and 11 m/s | The ragdoll folds at the joints within their limits, never comes apart, and sleeps as one island |
 | Mesh colliders | `7` `8` to choose, `6` to place, `9` for the rain, `F1` | The balls rest on the exact surface: between the humanoid's legs, through the hole of the torus, in the openings of the logo |
 | Camera | `W` `A` `S` `D` `R` `F` into any body | The camera stops at the surface or slides along it; a body dropped on it pushes it out |
 | Starting scene | `assets/trebuchet.csv` with `position,0,6,33.7` | `assets/trebuchet.csv: the camera would start inside the trebuchet at (0, 8.75, 33.7)` and exit status 1 |
-| Object file | `assets/block.csv` with `mass,-1,,` | `assets/block.csv:4: 'mass' must be positive` and exit status 1 |
+| Object file | `assets/block.csv` with `mass,-1,,` | `assets/block.csv:4: 'mass' must be within [0.1, 50]` and exit status 1 |
 | Reload | the same edits, then **Reload from files** in the menu | The same messages, then `Reload aborted: the object files above need fixing`; the running scene is kept |
 
 ### Error handling
@@ -332,7 +332,7 @@ half-loaded:
 
 ```
 assets/block.csv:1: first line must be the header '# property,value1,value2,value3'
-assets/block.csv:4: 'mass' must be positive
+assets/block.csv:4: 'mass' must be within [0.1, 50]
 assets/block.csv:9: unknown property 'density'
 assets/ground.csv: missing property 'normal'
 assets/apples.csv:7: duplicated property 'mass'

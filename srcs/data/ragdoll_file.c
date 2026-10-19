@@ -21,7 +21,7 @@ int	ragdoll_load(RagdollDef *ragdoll, const char *path)
 		return (0);
 	csv_expect_range(&csv, "height", ragdoll->height, RAGDOLL_HEIGHT_MIN, RAGDOLL_HEIGHT_MAX);
 	csv_expect_range(&csv, "mass", ragdoll->mass, RAGDOLL_MASS_MIN, RAGDOLL_MASS_MAX);
-	csv_expect_min(&csv, "friction", ragdoll->friction, 0.0f);
+	csv_expect_range(&csv, "friction", ragdoll->friction, 0.0f, FRICTION_MAX);
 	csv_expect_range(&csv, "elasticity", ragdoll->elasticity, 0.0f, 1.0f);
 	csv_expect_range_vec3(&csv, "color", ragdoll->color, 0.0f, 1.0f);
 	return (csv.errors == 0);

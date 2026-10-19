@@ -32,7 +32,7 @@ static void	validate(const Trebuchet *trebuchet, CsvFile *csv)
 	csv_expect_positive_vec3(csv, "counterweight_size", trebuchet->counterweightSize);
 	csv_expect_range(csv, "launch_speed", trebuchet->launchSpeed, LAUNCH_SPEED_MIN, LAUNCH_SPEED_MAX);
 	csv_expect_range(csv, "launch_angle", trebuchet->launchAngle, LAUNCH_ANGLE_MIN, LAUNCH_ANGLE_MAX);
-	csv_expect_min(csv, "friction", trebuchet->friction, 0.0f);
+	csv_expect_range(csv, "friction", trebuchet->friction, 0.0f, FRICTION_MAX);
 	csv_expect_range(csv, "elasticity", trebuchet->elasticity, 0.0f, 1.0f);
 	csv_expect_range_vec3(csv, "color", trebuchet->color, 0.0f, 1.0f);
 	if (trebuchet->frameHeight <= trebuchet->baseSize.y)
