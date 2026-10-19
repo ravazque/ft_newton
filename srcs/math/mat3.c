@@ -1,55 +1,53 @@
 #include "newton.h"
 
-/* 3x3 matrices for the inertia tensor (I_world = R I_local R^T). Column-major; M() reads as (row, col). */
-
-#define M(mat, row, col) ((mat).m[(col) * 3 + (row)])
+// 3x3 matrices for inertia tensors and joints; mat3_skew(v) is the cross product as a matrix: skew(v) . u = v x u.
 
 Mat3	mat3_identity(void)
 {
-	Mat3	r = {{0}};
+	Mat3	result = {{0}};
 
-	r.m[0] = 1.0f;
-	r.m[4] = 1.0f;
-	r.m[8] = 1.0f;
-	return (r);
+	result.cells[0] = 1.0f;
+	result.cells[4] = 1.0f;
+	result.cells[8] = 1.0f;
+	return (result);
 }
 
 Mat3	mat3_zero(void)
 {
-	Mat3	r = {{0}};
+	Mat3	result = {{0}};
 
-	return (r);
+	return (result);
 }
 
-Mat3	mat3_diagonal(Vec3 d)
+Mat3	mat3_diagonal(Vec3 diagonal)
 {
-	Mat3	r = {{0}};
+	Mat3	result = {{0}};
 
-	r.m[0] = d.x;
-	r.m[4] = d.y;
-	r.m[8] = d.z;
-	return (r);
+	result.cells[0] = diagonal.x;
+	result.cells[4] = diagonal.y;
+	result.cells[8] = diagonal.z;
+	return (result);
 }
 
-Mat3	mat3_from_quat(Quat q)
+Mat3	mat3_from_quat(Quat rotation)
 {
-	Mat3	r;
+	Mat3	result;
 
-	M(r, 0, 0) = 1.0f - 2.0f * (q.y * q.y + q.z * q.z);
-	M(r, 0, 1) = 2.0f * (q.x * q.y - q.w * q.z);
-	M(r, 0, 2) = 2.0f * (q.x * q.z + q.w * q.y);
-	M(r, 1, 0) = 2.0f * (q.x * q.y + q.w * q.z);
-	M(r, 1, 1) = 1.0f - 2.0f * (q.x * q.x + q.z * q.z);
-	M(r, 1, 2) = 2.0f * (q.y * q.z - q.w * q.x);
-	M(r, 2, 0) = 2.0f * (q.x * q.z - q.w * q.y);
-	M(r, 2, 1) = 2.0f * (q.y * q.z + q.w * q.x);
-	M(r, 2, 2) = 1.0f - 2.0f * (q.x * q.x + q.y * q.y);
-	return (r);
+	MAT3_AT(result, 0, 0) = 1.0f - 2.0f * (rotation.y * rotation.y + rotation.z * rotation.z);
+	MAT3_AT(result, 0, 1) = 2.0f * (rotation.x * rotation.y - rotation.w * rotation.z);
+	MAT3_AT(result, 0, 2) = 2.0f * (rotation.x * rotation.z + rotation.w * rotation.y);
+	MAT3_AT(result, 1, 0) = 2.0f * (rotation.x * rotation.y + rotation.w * rotation.z);
+	MAT3_AT(result, 1, 1) = 1.0f - 2.0f * (rotation.x * rotation.x + rotation.z * rotation.z);
+	MAT3_AT(result, 1, 2) = 2.0f * (rotation.y * rotation.z - rotation.w * rotation.x);
+	MAT3_AT(result, 2, 0) = 2.0f * (rotation.x * rotation.z - rotation.w * rotation.y);
+	MAT3_AT(result, 2, 1) = 2.0f * (rotation.y * rotation.z + rotation.w * rotation.x);
+	MAT3_AT(result, 2, 2) = 1.0f - 2.0f * (rotation.x * rotation.x + rotation.y * rotation.y);
+	return (result);
 }
 
-Mat3	mat3_transpose(Mat3 a)
+Mat3	mat3_transpose(Mat3 matrix)
 {
-	Mat3	r;
+	Mat3	result;
 	int		row;
 	int		col;
 
@@ -59,44 +57,50 @@ Mat3	mat3_transpose(Mat3 a)
 		col = 0;
 		while (col < 3)
 		{
-			M(r, row, col) = M(a, col, row);
+			MAT3_AT(result, row, col) = MAT3_AT(matrix, col, row);
 			col++;
 		}
 		row++;
 	}
-	return (r);
+	return (result);
 }
 
-/* Cofactor expansion; a singular matrix inverts to zero, which is what a static body needs. */
-Mat3	mat3_inverse(Mat3 a)
+// Cofactor expansion; a matrix singular for its own scale inverts to zero, which is what a static body needs.
+Mat3	mat3_inverse(Mat3 matrix)
 {
-	Mat3	r = {{0}};
-	float	c00 = M(a, 1, 1) * M(a, 2, 2) - M(a, 1, 2) * M(a, 2, 1);
-	float	c01 = M(a, 1, 2) * M(a, 2, 0) - M(a, 1, 0) * M(a, 2, 2);
-	float	c02 = M(a, 1, 0) * M(a, 2, 1) - M(a, 1, 1) * M(a, 2, 0);
-	float	det = M(a, 0, 0) * c00 + M(a, 0, 1) * c01 + M(a, 0, 2) * c02;
-	float	inv;
+	Mat3	result = {{0}};
+	float	cofactor0 = MAT3_AT(matrix, 1, 1) * MAT3_AT(matrix, 2, 2) - MAT3_AT(matrix, 1, 2) * MAT3_AT(matrix, 2, 1);
+	float	cofactor1 = MAT3_AT(matrix, 1, 2) * MAT3_AT(matrix, 2, 0) - MAT3_AT(matrix, 1, 0) * MAT3_AT(matrix, 2, 2);
+	float	cofactor2 = MAT3_AT(matrix, 1, 0) * MAT3_AT(matrix, 2, 1) - MAT3_AT(matrix, 1, 1) * MAT3_AT(matrix, 2, 0);
+	float	determinant = MAT3_AT(matrix, 0, 0) * cofactor0 + MAT3_AT(matrix, 0, 1) * cofactor1 + MAT3_AT(matrix, 0, 2) * cofactor2;
+	float	largest = 0.0f;
+	float	inverse;
+	int		i;
 
-	if (fabsf(det) < 1e-12f)
-		return (r);
-	inv = 1.0f / det;
-	M(r, 0, 0) = c00 * inv;
-	M(r, 1, 0) = c01 * inv;
-	M(r, 2, 0) = c02 * inv;
-	M(r, 0, 1) = (M(a, 0, 2) * M(a, 2, 1) - M(a, 0, 1) * M(a, 2, 2)) * inv;
-	M(r, 1, 1) = (M(a, 0, 0) * M(a, 2, 2) - M(a, 0, 2) * M(a, 2, 0)) * inv;
-	M(r, 2, 1) = (M(a, 0, 1) * M(a, 2, 0) - M(a, 0, 0) * M(a, 2, 1)) * inv;
-	M(r, 0, 2) = (M(a, 0, 1) * M(a, 1, 2) - M(a, 0, 2) * M(a, 1, 1)) * inv;
-	M(r, 1, 2) = (M(a, 0, 2) * M(a, 1, 0) - M(a, 0, 0) * M(a, 1, 2)) * inv;
-	M(r, 2, 2) = (M(a, 0, 0) * M(a, 1, 1) - M(a, 0, 1) * M(a, 1, 0)) * inv;
-	return (r);
+	i = 0;
+	while (i < 9)
+		largest = fmaxf(largest, fabsf(matrix.cells[i++]));
+	if (!(fabsf(determinant) > 1e-9f * largest * largest * largest))
+		return (result);
+	inverse = 1.0f / determinant;
+	MAT3_AT(result, 0, 0) = cofactor0 * inverse;
+	MAT3_AT(result, 1, 0) = cofactor1 * inverse;
+	MAT3_AT(result, 2, 0) = cofactor2 * inverse;
+	MAT3_AT(result, 0, 1) = (MAT3_AT(matrix, 0, 2) * MAT3_AT(matrix, 2, 1) - MAT3_AT(matrix, 0, 1) * MAT3_AT(matrix, 2, 2)) * inverse;
+	MAT3_AT(result, 1, 1) = (MAT3_AT(matrix, 0, 0) * MAT3_AT(matrix, 2, 2) - MAT3_AT(matrix, 0, 2) * MAT3_AT(matrix, 2, 0)) * inverse;
+	MAT3_AT(result, 2, 1) = (MAT3_AT(matrix, 0, 1) * MAT3_AT(matrix, 2, 0) - MAT3_AT(matrix, 0, 0) * MAT3_AT(matrix, 2, 1)) * inverse;
+	MAT3_AT(result, 0, 2) = (MAT3_AT(matrix, 0, 1) * MAT3_AT(matrix, 1, 2) - MAT3_AT(matrix, 0, 2) * MAT3_AT(matrix, 1, 1)) * inverse;
+	MAT3_AT(result, 1, 2) = (MAT3_AT(matrix, 0, 2) * MAT3_AT(matrix, 1, 0) - MAT3_AT(matrix, 0, 0) * MAT3_AT(matrix, 1, 2)) * inverse;
+	MAT3_AT(result, 2, 2) = (MAT3_AT(matrix, 0, 0) * MAT3_AT(matrix, 1, 1) - MAT3_AT(matrix, 0, 1) * MAT3_AT(matrix, 1, 0)) * inverse;
+	return (result);
 }
 
 Mat3	mat3_mul(Mat3 a, Mat3 b)
 {
-	Mat3	r;
+	Mat3	result = {{0}};
 	int		row;
 	int		col;
+	int		k;
 
 	row = 0;
 	while (row < 3)
@@ -104,20 +108,64 @@ Mat3	mat3_mul(Mat3 a, Mat3 b)
 		col = 0;
 		while (col < 3)
 		{
-			M(r, row, col) = M(a, row, 0) * M(b, 0, col) + M(a, row, 1) * M(b, 1, col) + M(a, row, 2) * M(b, 2, col);
+			k = 0;
+			while (k < 3)
+			{
+				MAT3_AT(result, row, col) += MAT3_AT(a, row, k) * MAT3_AT(b, k, col);
+				k++;
+			}
 			col++;
 		}
 		row++;
 	}
-	return (r);
+	return (result);
 }
 
-Vec3	mat3_mul_vec3(Mat3 a, Vec3 v)
+Vec3	mat3_mul_vec3(Mat3 matrix, Vec3 vector)
 {
-	Vec3	r;
+	Vec3	result;
 
-	r.x = M(a, 0, 0) * v.x + M(a, 0, 1) * v.y + M(a, 0, 2) * v.z;
-	r.y = M(a, 1, 0) * v.x + M(a, 1, 1) * v.y + M(a, 1, 2) * v.z;
-	r.z = M(a, 2, 0) * v.x + M(a, 2, 1) * v.y + M(a, 2, 2) * v.z;
-	return (r);
+	result.x = MAT3_AT(matrix, 0, 0) * vector.x + MAT3_AT(matrix, 0, 1) * vector.y + MAT3_AT(matrix, 0, 2) * vector.z;
+	result.y = MAT3_AT(matrix, 1, 0) * vector.x + MAT3_AT(matrix, 1, 1) * vector.y + MAT3_AT(matrix, 1, 2) * vector.z;
+	result.z = MAT3_AT(matrix, 2, 0) * vector.x + MAT3_AT(matrix, 2, 1) * vector.y + MAT3_AT(matrix, 2, 2) * vector.z;
+	return (result);
+}
+
+Mat3	mat3_add(Mat3 a, Mat3 b)
+{
+	int	i;
+
+	i = 0;
+	while (i < 9)
+	{
+		a.cells[i] += b.cells[i];
+		i++;
+	}
+	return (a);
+}
+
+Mat3	mat3_scale(Mat3 matrix, float factor)
+{
+	int	i;
+
+	i = 0;
+	while (i < 9)
+	{
+		matrix.cells[i] *= factor;
+		i++;
+	}
+	return (matrix);
+}
+
+Mat3	mat3_skew(Vec3 vector)
+{
+	Mat3	result = {{0}};
+
+	MAT3_AT(result, 0, 1) = -vector.z;
+	MAT3_AT(result, 0, 2) = vector.y;
+	MAT3_AT(result, 1, 0) = vector.z;
+	MAT3_AT(result, 1, 2) = -vector.x;
+	MAT3_AT(result, 2, 0) = -vector.y;
+	MAT3_AT(result, 2, 1) = vector.x;
+	return (result);
 }

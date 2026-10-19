@@ -1,27 +1,30 @@
 #include "newton.h"
 
-/* Inertia tensors, the rotational counterpart of mass: built inverted in body space from the
- * collider, rotated into world space whenever the body turns [F5]-[F7]. */
+// Inverse inertia tensors: built in body space from the collider, rotated into world space when the body turns.
 
-Mat3	inertia_local_inverse(const Collider *c, float mass)
+Mat3	inertia_local_inverse(const Collider *collider, float mass)
 {
-	Vec3	h;
-	float	i;
+	Vec3	half;
+	Vec3	squares;
+	float	moment;
 
-	if (mass <= 0.0f || c->type == SHAPE_PLANE)
+	if (mass <= 0.0f || collider->type == SHAPE_PLANE)
 		return (mat3_zero());
-	if (c->type == SHAPE_SPHERE)
+	if (collider->type == SHAPE_SPHERE)
 	{
-		i = 0.4f * mass * c->radius * c->radius;   /* [F5] I = 2/5 m R^2 */
-		return (mat3_inverse(mat3_diagonal(vec3(i, i, i))));
+		moment = 0.4f * mass * collider->radius * collider->radius;   // [F5] I = 2/5 m R^2
+		return (mat3_inverse(mat3_diagonal(vec3(moment, moment, moment))));
 	}
-	h = c->halfExtents;
-	return (mat3_inverse(mat3_diagonal(vec3_scale(vec3(h.y * h.y + h.z * h.z, h.x * h.x + h.z * h.z, h.x * h.x + h.y * h.y), mass / 3.0f))));   /* [F6] */
+	if (collider->type == SHAPE_MESH)
+		return (mat3_inverse(mat3_scale(collider->mesh->inertiaPerKg, mass)));   // [F27]
+	half = collider->halfExtents;
+	squares = vec3(half.y * half.y + half.z * half.z, half.x * half.x + half.z * half.z, half.x * half.x + half.y * half.y);
+	return (mat3_inverse(mat3_diagonal(vec3_scale(squares, mass / 3.0f))));   // [F6]
 }
 
-void	inertia_update_world(RigidBody *b)
+void	inertia_update_world(RigidBody *body)
 {
-	Mat3	r = mat3_from_quat(b->orientation);
+	Mat3	rotation = mat3_from_quat(body->orientation);
 
-	b->invInertiaWorld = mat3_mul(mat3_mul(r, b->invInertiaLocal), mat3_transpose(r));   /* [F7] I_world^-1 = R I^-1 R^T */
+	body->inverseInertiaWorld = mat3_mul(mat3_mul(rotation, body->inverseInertiaLocal), mat3_transpose(rotation));   // [F7] I^-1 = R I^-1 R^T
 }

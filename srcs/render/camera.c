@@ -1,64 +1,62 @@
 #include "newton.h"
 
-/* Free-flying camera: a position plus a yaw / pitch look direction, turned into the view and
- * projection matrices. */
+// Free-flying camera: a position and a yaw and pitch, turned into the view and projection matrices.
 
-/* On the +Z side, framing the trebuchet on the left and the structures on the right. */
 Camera	camera_default(void)
 {
-	Camera	c;
+	Camera	camera;
 
-	c.position = vec3(0.0f, 8.75f, 33.7f);
-	c.up = vec3(0.0f, 1.0f, 0.0f);
-	c.yaw = DEG2RAD(-90.0f);
-	c.pitch = DEG2RAD(-8.0f);
-	c.moveSpeed = CAM_MOVE_SPEED;
-	c.fovYDegrees = 60.0f;
-	c.nearPlane = 0.1f;
-	c.farPlane = 500.0f;
-	c.win_width = WIN_WIDTH;
-	c.win_height = WIN_HEIGHT;
-	return (c);
+	camera.position = vec3(0.0f, 8.75f, 33.7f);
+	camera.up = vec3(0.0f, 1.0f, 0.0f);
+	camera.yaw = DEG2RAD(-90.0f);
+	camera.pitch = DEG2RAD(-8.0f);
+	camera.moveSpeed = CAM_MOVE_SPEED;
+	camera.fovYDegrees = 60.0f;
+	camera.nearPlane = 0.1f;
+	camera.farPlane = 500.0f;
+	camera.windowWidth = WIN_WIDTH;
+	camera.windowHeight = WIN_HEIGHT;
+	return (camera);
 }
 
-static Vec3	camera_forward(const Camera *cam)
+static Vec3	camera_forward(const Camera *camera)
 {
-	float	cp = cosf(cam->pitch);
+	float	cos_pitch = cosf(camera->pitch);
 
-	return (vec3(cp * cosf(cam->yaw), sinf(cam->pitch), cp * sinf(cam->yaw)));
+	return (vec3(cos_pitch * cosf(camera->yaw), sinf(camera->pitch), cos_pitch * sinf(camera->yaw)));
 }
 
-/* Horizontal right axis, so strafing stays level whatever the pitch. */
-static Vec3	camera_right(const Camera *cam)
+// Horizontal, so strafing stays level whatever the pitch.
+static Vec3	camera_right(const Camera *camera)
 {
-	return (vec3_normalized(vec3_cross(camera_forward(cam), cam->up)));
+	return (vec3_normalized(vec3_cross(camera_forward(camera), camera->up)));
 }
 
-void	camera_look(Camera *cam, float delta_yaw, float delta_pitch)
+void	camera_look(Camera *camera, float delta_yaw, float delta_pitch)
 {
-	cam->yaw += delta_yaw;
-	cam->pitch = fminf(fmaxf(cam->pitch + delta_pitch, CAM_MIN_PITCH), CAM_MAX_PITCH);
+	camera->yaw += delta_yaw;
+	camera->pitch = fminf(fmaxf(camera->pitch + delta_pitch, CAM_MIN_PITCH), CAM_MAX_PITCH);
 }
 
-/* Delta in the eye's frame: x right, y world up, z along the view. */
-void	camera_move(Camera *cam, Vec3 local_delta)
+Vec3	camera_world_delta(const Camera *camera, Vec3 local_delta)
 {
-	cam->position = vec3_add(cam->position, vec3_scale(camera_right(cam), local_delta.x));
-	cam->position = vec3_add(cam->position, vec3_scale(cam->up, local_delta.y));
-	cam->position = vec3_add(cam->position, vec3_scale(camera_forward(cam), local_delta.z));
+	Vec3	delta = vec3_scale(camera_right(camera), local_delta.x);
+
+	delta = vec3_add(delta, vec3_scale(camera->up, local_delta.y));
+	return (vec3_add(delta, vec3_scale(camera_forward(camera), local_delta.z)));
 }
 
-void	camera_change_speed(Camera *cam, float delta)
+void	camera_change_speed(Camera *camera, float delta)
 {
-	cam->moveSpeed = fminf(fmaxf(cam->moveSpeed + delta, CAM_SPEED_MIN), CAM_SPEED_MAX);
+	camera->moveSpeed = fminf(fmaxf(camera->moveSpeed + delta, CAM_SPEED_MIN), CAM_SPEED_MAX);
 }
 
-Mat4	camera_view(const Camera *cam)
+Mat4	camera_view(const Camera *camera)
 {
-	return (mat4_look_at(cam->position, vec3_add(cam->position, camera_forward(cam)), cam->up));
+	return (mat4_look_at(camera->position, vec3_add(camera->position, camera_forward(camera)), camera->up));
 }
 
-Mat4	camera_projection(const Camera *cam, float aspect)
+Mat4	camera_projection(const Camera *camera, float aspect)
 {
-	return (mat4_perspective(DEG2RAD(cam->fovYDegrees), aspect, cam->nearPlane, cam->farPlane));
+	return (mat4_perspective(DEG2RAD(camera->fovYDegrees), aspect, camera->nearPlane, camera->farPlane));
 }

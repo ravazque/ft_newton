@@ -1,101 +1,144 @@
 #include "newton.h"
 
-/*
- * What the menu buttons do. The menu edits a Draft, never the running world:
- * Apply commits it (and makes it what Reset returns to), Save writes it to the
- * object files without applying it, Reload re-reads the files into both, Reset
- * rebuilds the starting scene.
-*/
+// The menu buttons: Apply commits the draft, Save writes it to the files, Reload reads them back, Reset rebuilds the scene.
 
-/* Opening the menu starts from the live values, never stale ones. */
-void	action_sync_draft(Game *g)
+void	action_sync_draft(Game *game)
 {
-	g->draft.apple = g->appleDef;
-	g->draft.block = g->blockDef;
-	g->draft.ground = g->groundDef;
-	g->draft.trebuchet = g->trebuchet;
-	g->draft.gravityY = g->world.gravity.y;
-	g->draft.timeScale = g->timeScale;
-	g->menu.dirty = 0;
+	game->draft.apple = game->appleDef;
+	game->draft.block = game->blockDef;
+	game->draft.ground = game->groundDef;
+	game->draft.trebuchet = game->trebuchet;
+	game->draft.ragdoll = game->ragdollDef;
+	game->draft.model = game->modelDef;
+	game->draft.gravityY = game->world.gravity.y;
+	game->draft.timeScale = game->timeScale;
+	game->menu.dirty = 0;
 }
 
-static void	apply_draft(Game *g)
+static void	resize_models(Game *game)
 {
-	g->appleDef = g->draft.apple;
-	g->blockDef = g->draft.block;
-	g->groundDef = g->draft.ground;
-	g->trebuchet.launchSpeed = g->draft.trebuchet.launchSpeed;
-	g->trebuchet.launchAngle = g->draft.trebuchet.launchAngle;
-	g->trebuchet.friction = g->draft.trebuchet.friction;
-	g->trebuchet.elasticity = g->draft.trebuchet.elasticity;
-	g->world.gravity.y = g->draft.gravityY;
-	g->timeScale = g->draft.timeScale;
-	g->trebuchetDef = g->trebuchet;
-	scene_apply_definitions(g);
-	world_wake_all(&g->world);
-	g->menu.dirty = 0;
-	g->hud.refresh = 1;
+	int	i;
+
+	if (game->models.count == 0 || game->models.shapes[0].size == game->modelDef.modelSize)
+		return ;
+	model_resize_all(&game->world, &game->models, game->modelDef.modelSize);
+	i = 0;
+	while (i < game->models.count)
+	{
+		mesh_release(&game->meshes.models[i]);
+		game->meshes.models[i] = mesh_from_shape(&game->models.shapes[i]);
+		i++;
+	}
+	printf("Models resized to %g m\n", (double)game->modelDef.modelSize);
+}
+
+static void	apply_draft(Game *game)
+{
+	game->appleDef = game->draft.apple;
+	game->blockDef = game->draft.block;
+	game->groundDef = game->draft.ground;
+	game->ragdollDef = game->draft.ragdoll;
+	game->modelDef = game->draft.model;
+	game->trebuchet.launchSpeed = game->draft.trebuchet.launchSpeed;
+	game->trebuchet.launchAngle = game->draft.trebuchet.launchAngle;
+	game->trebuchet.friction = game->draft.trebuchet.friction;
+	game->trebuchet.elasticity = game->draft.trebuchet.elasticity;
+	game->world.gravity.y = game->draft.gravityY;
+	game->timeScale = game->draft.timeScale;
+	game->trebuchetDef = game->trebuchet;
+	resize_models(game);
+	scene_apply_definitions(game);
+	world_wake_all(&game->world);
+	game->menu.dirty = 0;
+	game->hud.refresh = 1;
 	printf("Menu values applied to the simulation\n");
 }
 
-/* Mass and material reach existing bodies at once; geometry only reaches new bodies, or all of
- * them after Reset. */
-static void	reload_definitions(Game *g)
+// Mass, material and the model size reach the existing bodies at once; other geometry reaches new bodies, or all after a reset.
+static void	reload_definitions(Game *game)
 {
-	if (!scene_load_assets(g))
+	if (!scene_load_assets(game))
 	{
-		fprintf(stderr, "Reload aborted: fix the object files and try again\n");
+		fprintf(stderr, "Reload aborted: the object files above need fixing\n");
 		return ;
 	}
-	g->trebuchet.launchSpeed = g->trebuchetDef.launchSpeed;
-	g->trebuchet.launchAngle = g->trebuchetDef.launchAngle;
-	g->trebuchet.friction = g->trebuchetDef.friction;
-	g->trebuchet.elasticity = g->trebuchetDef.elasticity;
-	g->trebuchet.color = g->trebuchetDef.color;
-	scene_apply_definitions(g);
-	world_wake_all(&g->world);
-	action_sync_draft(g);
-	g->hud.refresh = 1;
+	game->trebuchet.launchSpeed = game->trebuchetDef.launchSpeed;
+	game->trebuchet.launchAngle = game->trebuchetDef.launchAngle;
+	game->trebuchet.friction = game->trebuchetDef.friction;
+	game->trebuchet.elasticity = game->trebuchetDef.elasticity;
+	game->trebuchet.color = game->trebuchetDef.color;
+	resize_models(game);
+	scene_apply_definitions(game);
+	world_wake_all(&game->world);
+	action_sync_draft(game);
+	game->hud.refresh = 1;
 	printf("Object files reloaded: existing objects updated\n");
 }
 
-static void	reset_simulation(Game *g)
+static void	reset_simulation(Game *game)
 {
-	g->world.gravity = vec3(0.0f, GRAVITY_Y, 0.0f);
-	g->timeScale = 1.0f;
-	scene_build(g);
-	action_sync_draft(g);
+	game->world.gravity = vec3(0.0f, GRAVITY_Y, 0.0f);
+	game->timeScale = 1.0f;
+	scene_build(game);
+	action_sync_draft(game);
 	printf("Simulation reset\n");
 }
 
-static void	save_definitions(Game *g)
+static void	save_definitions(Game *game)
 {
 	int	ok;
 
-	ok = objectdef_save(&g->draft.apple, ASSET_APPLE);
-	ok = objectdef_save(&g->draft.block, ASSET_BLOCK) && ok;
-	ok = objectdef_save(&g->draft.ground, ASSET_GROUND) && ok;
-	ok = trebuchet_save(&g->draft.trebuchet, ASSET_TREBUCHET) && ok;
+	ok = object_def_save(&game->draft.apple, ASSET_APPLE);
+	ok = object_def_save(&game->draft.block, ASSET_BLOCK) && ok;
+	ok = object_def_save(&game->draft.ground, ASSET_GROUND) && ok;
+	ok = trebuchet_save(&game->draft.trebuchet, ASSET_TREBUCHET) && ok;
+	ok = ragdoll_save(&game->draft.ragdoll, ASSET_RAGDOLL) && ok;
+	ok = object_def_save(&game->draft.model, ASSET_MODELS) && ok;
 	if (ok)
 		printf("Object files written (the running simulation is unchanged until Apply)\n");
 }
 
-void	action_run(Game *g, MenuAction action)
+static void	open_page(Game *game, MenuPage page)
+{
+	game->menu.page = page;
+	menu_rows_build(game);
+}
+
+static void	close_menu(Game *game)
+{
+	open_page(game, MENU_PAGE_MAIN);
+	game->menu.open = 0;
+	game->paused = 0;
+	game->hud.refresh = 1;
+}
+
+static void	place_model(Game *game, int model)
+{
+	if (model < 0 || model >= game->models.count)
+		return ;
+	game->models.selected = model;
+	close_menu(game);
+	model_spawn(&game->world, &game->modelDef, &game->models.shapes[model], vec3(TARGET_X, 0.0f, 0.0f));
+}
+
+void	action_run(Game *game, MenuAction action)
 {
 	if (action == ACTION_APPLY)
-		apply_draft(g);
+		apply_draft(game);
 	else if (action == ACTION_RELOAD)
-		reload_definitions(g);
+		reload_definitions(game);
 	else if (action == ACTION_SAVE)
-		save_definitions(g);
+		save_definitions(game);
 	else if (action == ACTION_RESET)
-		reset_simulation(g);
+		reset_simulation(game);
 	else if (action == ACTION_RESUME)
-	{
-		g->menu.open = 0;
-		g->paused = 0;
-		g->hud.refresh = 1;
-	}
+		close_menu(game);
 	else if (action == ACTION_QUIT)
-		g->quit = 1;
+		game->quit = 1;
+	else if (action == ACTION_MODELS)
+		open_page(game, MENU_PAGE_MODELS);
+	else if (action == ACTION_BACK)
+		open_page(game, MENU_PAGE_MAIN);
+	else if (action == ACTION_PLACE_MODEL)
+		place_model(game, game->menu.pendingModel);
 }

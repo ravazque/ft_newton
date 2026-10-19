@@ -1,79 +1,92 @@
 #include "newton.h"
 
-/*
- * Positional correction [F23]: after the velocity solver, the overlap left beyond
- * PENETRATION_SLOP is removed by moving and slightly rotating the bodies through
- * the same effective masses, a fraction per pass. Several passes let a push travel
- * through a stack within one step (ground -> bottom box -> next box...).
-*/
+// Positional correction [F23]: overlap and joint drift removed on poses, a share per pass, so no energy is added.
 
-/* Overlap left at a contact: its depth minus how far this step's corrections moved the two points apart. */
-static float	current_depth(const World *w, const Contact *c, Vec3 ra, Vec3 rb)
+// Overlap left at a contact: its depth minus how far this step's corrections moved the two points apart.
+static float	current_depth(const World *world, const Contact *contact, Vec3 arm_a, Vec3 arm_b)
 {
-	Vec3	moved_a = vec3_add(vec3_sub(w->bodies[c->a].position, w->startPositions[c->a]), vec3_cross(w->rotationDelta[c->a], ra));
-	Vec3	moved_b = vec3_add(vec3_sub(w->bodies[c->b].position, w->startPositions[c->b]), vec3_cross(w->rotationDelta[c->b], rb));
+	Vec3	moved_a = vec3_add(vec3_sub(world->bodies[contact->bodyA].position, world->startPositions[contact->bodyA]), vec3_cross(world->rotationDelta[contact->bodyA], arm_a));
+	Vec3	moved_b = vec3_add(vec3_sub(world->bodies[contact->bodyB].position, world->startPositions[contact->bodyB]), vec3_cross(world->rotationDelta[contact->bodyB], arm_b));
 
-	return (c->penetration - vec3_dot(c->normal, vec3_sub(moved_b, moved_a)));
+	return (contact->penetration - vec3_dot(contact->normal, vec3_sub(moved_b, moved_a)));
 }
 
-/* A positional "impulse": translation by 1/m and a small rotation by I^-1, applied to the pose. */
-static void	push_body(World *w, int index, Vec3 r, Vec3 push)
+void	correction_push(World *world, int body, Vec3 arm, Vec3 push)
 {
-	RigidBody	*b = &w->bodies[index];
+	RigidBody	*target = &world->bodies[body];
 	Vec3		rotation;
 
-	if (b->invMass == 0.0f)
+	if (target->inverseMass == 0.0f)
 		return ;
-	b->position = vec3_add(b->position, vec3_scale(push, b->invMass));   /* [F23] x += c n / m */
-	rotation = mat3_mul_vec3(b->invInertiaWorld, vec3_cross(r, push));   /* [F23] I^-1 (r x c n) */
-	w->rotationDelta[index] = vec3_add(w->rotationDelta[index], rotation);
-	b->orientation = quat_integrate(b->orientation, rotation, 1.0f);
+	target->position = vec3_add(target->position, vec3_scale(push, target->inverseMass));   // [F23] x += c n / m
+	rotation = mat3_mul_vec3(target->inverseInertiaWorld, vec3_cross(arm, push));          // [F23] I^-1 (r x c n)
+	world->rotationDelta[body] = vec3_add(world->rotationDelta[body], rotation);
+	target->orientation = quat_integrate(target->orientation, rotation, 1.0f);
 }
 
-static void	correction_pass(World *w)
+void	correction_turn(World *world, int body, Vec3 angular_push)
 {
-	const Contact	*c;
-	Vec3			ra;
-	Vec3			rb;
+	RigidBody	*target = &world->bodies[body];
+	Vec3		rotation;
+
+	if (target->inverseMass == 0.0f)
+		return ;
+	rotation = mat3_mul_vec3(target->inverseInertiaWorld, angular_push);
+	world->rotationDelta[body] = vec3_add(world->rotationDelta[body], rotation);
+	target->orientation = quat_integrate(target->orientation, rotation, 1.0f);
+}
+
+static void	correct_contacts(World *world)
+{
+	const Contact	*contact;
+	Vec3			arm_a;
+	Vec3			arm_b;
 	float			depth;
 	float			amount;
 	int				i;
 
 	i = 0;
-	while (i < w->contactCount)
+	while (i < world->contactCount)
 	{
-		c = &w->contacts[i];
-		ra = vec3_sub(c->point, w->startPositions[c->a]);
-		rb = vec3_sub(c->point, w->startPositions[c->b]);
-		depth = clampf(current_depth(w, c, ra, rb) - PENETRATION_SLOP, 0.0f, MAX_CORRECTION);
-		amount = depth * PENETRATION_PERCENT * c->massNormal;   /* [F23] */
+		contact = &world->contacts[i];
+		arm_a = vec3_sub(contact->point, world->startPositions[contact->bodyA]);
+		arm_b = vec3_sub(contact->point, world->startPositions[contact->bodyB]);
+		depth = clampf(current_depth(world, contact, arm_a, arm_b) - PENETRATION_SLOP, 0.0f, MAX_CORRECTION);
+		amount = depth * PENETRATION_PERCENT * contact->massNormal;   // [F23]
 		if (amount > 0.0f)
 		{
-			push_body(w, c->a, ra, vec3_scale(c->normal, -amount));
-			push_body(w, c->b, rb, vec3_scale(c->normal, amount));
+			correction_push(world, contact->bodyA, arm_a, vec3_scale(contact->normal, -amount * contact->scaleA));   // [F39]
+			correction_push(world, contact->bodyB, arm_b, vec3_scale(contact->normal, amount * contact->scaleB));
 		}
 		i++;
 	}
 }
 
-void	correction_apply(World *w)
+void	correction_apply(World *world)
 {
 	int	pass;
 	int	i;
 
-	if (!world_grow_scratch(w))
+	if (!world_grow_scratch(world))
 		return ;
 	i = 0;
-	while (i < w->bodyCount)
+	while (i < world->bodyCount)
 	{
-		w->startPositions[i] = w->bodies[i].position;
-		w->rotationDelta[i] = vec3(0.0f, 0.0f, 0.0f);
+		world->startPositions[i] = world->bodies[i].position;
+		world->rotationDelta[i] = vec3(0.0f, 0.0f, 0.0f);
 		i++;
 	}
 	pass = 0;
 	while (pass < POSITION_ITERATIONS)
 	{
-		correction_pass(w);
+		i = 0;
+		while (i < world->jointCount)
+		{
+			joint_point_correct(world, &world->joints[i]);
+			joint_limit_correct(world, &world->joints[i]);
+			i++;
+		}
+		correct_contacts(world);
 		pass++;
 	}
 }

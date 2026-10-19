@@ -1,59 +1,58 @@
 #include "newton.h"
 
-/* What one frame shows: every body with its collider's mesh, the aim bar, the collider
- * wireframes (F1), the menu overlay and the title readout. */
+// One frame: every body with its collider's mesh, the aim bar, the debug display (F1), the menu and the title readout.
 
-static void	draw_bodies(Game *g)
+static void	draw_bodies(Game *game)
 {
-	const RigidBody	*b;
+	const RigidBody	*body;
 	int				i;
 
 	i = 0;
-	while (i < g->world.bodyCount)
+	while (i < game->world.bodyCount)
 	{
-		b = &g->world.bodies[i];
-		renderer_draw(&g->renderer, renderer_body_mesh(b, &g->cubeMesh, &g->sphereMesh, &g->planeMesh), renderer_body_model(b, 1.0f), b->color);
+		body = &game->world.bodies[i];
+		renderer_draw(&game->renderer, renderer_body_mesh(body, &game->meshes), renderer_body_model(body, 1.0f), body->color);
 		i++;
 	}
 }
 
-/* The thick bar runs from the arm tip to where apples appear (the same distance at
- * every angle); the thin tail past it grows with the launch speed. */
-static void	draw_aim(Game *g)
+// A thick bar from the arm tip to where apples appear, then a thin tail that grows with the launch speed.
+static void	draw_aim(Game *game)
 {
-	Vec3	direction = trebuchet_direction(&g->trebuchet);
-	Quat	rot = quat_from_axis_angle(vec3(0.0f, 0.0f, 1.0f), DEG2RAD(g->trebuchet.launchAngle));
-	float	barrel = g->trebuchet.spawnDistance;
-	float	tail = g->trebuchet.launchSpeed * AIM_LENGTH_PER_MPS;
-	Vec3	barrel_center = vec3_add(g->trebuchet.launchPoint, vec3_scale(direction, barrel * 0.5f));
-	Vec3	tail_center = vec3_add(trebuchet_spawn_point(&g->trebuchet), vec3_scale(direction, tail * 0.5f));
+	const Trebuchet	*trebuchet = &game->trebuchet;
+	Vec3			direction = trebuchet_direction(trebuchet);
+	Quat			rotation = quat_from_axis_angle(vec3(0.0f, 0.0f, 1.0f), DEG2RAD(trebuchet->launchAngle));
+	float			bar_length = trebuchet->spawnDistance;
+	float			tail_length = trebuchet->launchSpeed * AIM_LENGTH_PER_MPS;
+	Vec3			bar_center = vec3_add(trebuchet->launchPoint, vec3_scale(direction, bar_length * 0.5f));
+	Vec3			tail_center = vec3_add(trebuchet_spawn_point(trebuchet), vec3_scale(direction, tail_length * 0.5f));
 
-	renderer_set_wireframe(&g->renderer, 1);
-	renderer_draw_flat(&g->renderer, &g->cubeMesh, mat4_transform(barrel_center, rot, vec3(barrel, AIM_BAR_THICKNESS, AIM_BAR_THICKNESS)), vec3(1.0f, 0.90f, 0.20f));
-	renderer_draw_flat(&g->renderer, &g->cubeMesh, mat4_transform(tail_center, rot, vec3(tail, AIM_TAIL_THICKNESS, AIM_TAIL_THICKNESS)), vec3(1.0f, 0.62f, 0.12f));
-	renderer_set_wireframe(&g->renderer, 0);
+	renderer_set_wireframe(&game->renderer, 1);
+	renderer_draw_flat(&game->renderer, &game->meshes.cube, mat4_transform(bar_center, rotation, vec3(bar_length, AIM_BAR_THICKNESS, AIM_BAR_THICKNESS)), vec3(1.0f, 0.90f, 0.20f));
+	renderer_draw_flat(&game->renderer, &game->meshes.cube, mat4_transform(tail_center, rotation, vec3(tail_length, AIM_TAIL_THICKNESS, AIM_TAIL_THICKNESS)), vec3(1.0f, 0.62f, 0.12f));
+	renderer_set_wireframe(&game->renderer, 0);
 }
 
-static void	draw_menu(Game *g)
+static void	draw_menu(Game *game)
 {
 	float	width;
 	float	height;
 
-	if (!g->menu.open)
+	if (!game->menu.open)
 		return ;
-	window_size(&g->window, &width, &height);
-	menu_layout(&g->menu, width, height);
-	ui_begin(&g->ui, width, height);
-	menu_draw(&g->menu, &g->ui);
-	ui_end(&g->ui, &g->renderer);
+	window_size(&game->window, &width, &height);
+	menu_layout(&game->menu, width, height);
+	ui_begin(&game->ui, width, height);
+	menu_draw(&game->menu, &game->ui);
+	ui_end(&game->ui, &game->renderer);
 }
 
-void	draw_frame(Game *g)
+void	draw_frame(Game *game)
 {
-	renderer_begin_frame(&g->renderer, &g->camera, window_aspect(&g->window));
-	draw_bodies(g);
-	draw_aim(g);
-	debugdraw_draw_colliders(&g->debug, &g->world, &g->renderer, &g->cubeMesh, &g->sphereMesh, &g->planeMesh);
-	draw_menu(g);
-	hud_draw(&g->hud, &g->world, &g->trebuchet, g->timeScale, &g->window, g->paused);
+	renderer_begin_frame(&game->renderer, &game->camera, window_aspect(&game->window));
+	draw_bodies(game);
+	draw_aim(game);
+	debugdraw_draw(&game->debug, &game->world, &game->renderer, &game->meshes);
+	draw_menu(game);
+	hud_draw(&game->hud, game);
 }

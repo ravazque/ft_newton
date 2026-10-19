@@ -1,106 +1,75 @@
 #include "newton.h"
 
-/* Loads, compiles and links the GLSL program from shaders/, and sets its uniforms by name. */
+// The GLSL program of shaders/: compiled, linked, and its uniforms set by name.
 
-/* Reads a whole text file into a malloc'd, NUL-terminated buffer. */
-static char	*read_file(const char *path)
+static unsigned int	compile_stage(unsigned int type, const char *source, const char *label)
 {
-	FILE	*f;
-	long	size;
-	char	*buf;
-	size_t	rd;
-
-	f = fopen(path, "rb");
-	if (!f)
-		return (fprintf(stderr, "Shader: cannot open %s\n", path), NULL);
-	fseek(f, 0, SEEK_END);
-	size = ftell(f);
-	fseek(f, 0, SEEK_SET);
-	if (size < 0)
-		return (fclose(f), NULL);
-	buf = malloc((size_t)size + 1);
-	if (!buf)
-		return (fclose(f), NULL);
-	rd = fread(buf, 1, (size_t)size, f);
-	buf[rd] = '\0';
-	fclose(f);
-	return (buf);
-}
-
-static unsigned int	compile_stage(unsigned int type, const char *src, const char *label)
-{
-	unsigned int	shader;
-	int				ok;
+	unsigned int	stage;
+	int				compiled;
 	char			log[1024];
 
-	shader = glCreateShader(type);
-	glShaderSource(shader, 1, &src, NULL);
-	glCompileShader(shader);
-	ok = 0;
-	glGetShaderiv(shader, GL_COMPILE_STATUS, &ok);
-	if (!ok)
+	stage = glCreateShader(type);
+	glShaderSource(stage, 1, &source, NULL);
+	glCompileShader(stage);
+	compiled = 0;
+	glGetShaderiv(stage, GL_COMPILE_STATUS, &compiled);
+	if (!compiled)
 	{
-		glGetShaderInfoLog(shader, sizeof(log), NULL, log);
+		glGetShaderInfoLog(stage, sizeof(log), NULL, log);
 		fprintf(stderr, "Shader compile error (%s):\n%s\n", label, log);
 	}
-	return (shader);
+	return (stage);
 }
 
-int	shader_load(Shader *sh, const char *vert_path, const char *frag_path)
+int	shader_load(Shader *shader, const char *vertex_path, const char *fragment_path)
 {
-	char			*vsrc;
-	char			*fsrc;
-	unsigned int	vs;
-	unsigned int	fs;
-	int				ok;
+	char			*vertex_source;
+	char			*fragment_source;
+	unsigned int	vertex_stage;
+	unsigned int	fragment_stage;
+	int				linked;
+	char			log[1024];
 
-	vsrc = read_file(vert_path);
-	fsrc = read_file(frag_path);
-	if (!vsrc || !fsrc)
-		return (free(vsrc), free(fsrc), 0);
-	vs = compile_stage(GL_VERTEX_SHADER, vsrc, vert_path);
-	fs = compile_stage(GL_FRAGMENT_SHADER, fsrc, frag_path);
-	free(vsrc);
-	free(fsrc);
-	sh->program = glCreateProgram();
-	glAttachShader(sh->program, vs);
-	glAttachShader(sh->program, fs);
-	glLinkProgram(sh->program);
-	ok = 0;
-	glGetProgramiv(sh->program, GL_LINK_STATUS, &ok);
-	if (!ok)
+	vertex_source = file_read(vertex_path);
+	fragment_source = file_read(fragment_path);
+	if (!vertex_source || !fragment_source)
+		return (free(vertex_source), free(fragment_source), 0);
+	vertex_stage = compile_stage(GL_VERTEX_SHADER, vertex_source, vertex_path);
+	fragment_stage = compile_stage(GL_FRAGMENT_SHADER, fragment_source, fragment_path);
+	free(vertex_source);
+	free(fragment_source);
+	shader->program = glCreateProgram();
+	glAttachShader(shader->program, vertex_stage);
+	glAttachShader(shader->program, fragment_stage);
+	glLinkProgram(shader->program);
+	linked = 0;
+	glGetProgramiv(shader->program, GL_LINK_STATUS, &linked);
+	if (!linked)
 	{
-		char	log[1024];
-
-		glGetProgramInfoLog(sh->program, sizeof(log), NULL, log);
+		glGetProgramInfoLog(shader->program, sizeof(log), NULL, log);
 		fprintf(stderr, "Shader link error:\n%s\n", log);
 	}
-	glDeleteShader(vs);
-	glDeleteShader(fs);
-	return (ok != 0);
+	glDeleteShader(vertex_stage);
+	glDeleteShader(fragment_stage);
+	return (linked != 0);
 }
 
-void	shader_use(const Shader *sh)
+void	shader_use(const Shader *shader)
 {
-	glUseProgram(sh->program);
+	glUseProgram(shader->program);
 }
 
-void	shader_set_mat4(const Shader *sh, const char *name, Mat4 value)
+void	shader_set_mat4(const Shader *shader, const char *name, Mat4 value)
 {
-	glUniformMatrix4fv(glGetUniformLocation(sh->program, name), 1, GL_FALSE, value.m);
+	glUniformMatrix4fv(glGetUniformLocation(shader->program, name), 1, GL_FALSE, value.cells);
 }
 
-void	shader_set_vec3(const Shader *sh, const char *name, Vec3 value)
+void	shader_set_vec3(const Shader *shader, const char *name, Vec3 value)
 {
-	glUniform3f(glGetUniformLocation(sh->program, name), value.x, value.y, value.z);
+	glUniform3f(glGetUniformLocation(shader->program, name), value.x, value.y, value.z);
 }
 
-void	shader_set_float(const Shader *sh, const char *name, float value)
+void	shader_set_int(const Shader *shader, const char *name, int value)
 {
-	glUniform1f(glGetUniformLocation(sh->program, name), value);
-}
-
-void	shader_set_int(const Shader *sh, const char *name, int value)
-{
-	glUniform1i(glGetUniformLocation(sh->program, name), value);
+	glUniform1i(glGetUniformLocation(shader->program, name), value);
 }

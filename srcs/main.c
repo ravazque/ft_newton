@@ -2,11 +2,11 @@
 
 int	main(int argc, char *argv[])
 {
-	Game	g;
+	Game	game;
 
-	if (!game_init(&g, argc, argv))
+	if (!game_init(&game, argc, argv))
 		return (1);
-	game_run(&g);
-	game_shutdown(&g);
+	game_run(&game);
+	game_shutdown(&game);
 	return (0);
 }

@@ -1,20 +1,14 @@
 #include "newton.h"
 
-/*
- * Contact manifolds of the box contacts: Sutherland-Hodgman clipping of a face
- * polygon [F16], and the reduction of many candidate points to at most
- * MAX_CONTACTS_PER_PAIR well spread ones. Keeping only the deepest points would
- * cluster them on one side and make a resting box rock.
-*/
+// Face clipping [F16] and the reduction of many contact candidates to four spread ones, so a resting body does not rock.
 
-/* Keeps the part of the polygon behind the plane dot(n, x) = off, in place. */
-int	manifold_clip(Vec3 *poly, int count, Vec3 n, float off)
+int	manifold_clip(Vec3 *polygon, int count, Vec3 normal, float offset)
 {
-	Vec3	out[12];
-	Vec3	cur;
-	Vec3	nxt;
-	float	dc;
-	float	dn;
+	Vec3	kept_points[12];
+	Vec3	current;
+	Vec3	next;
+	float	current_side;
+	float	next_side;
 	int		kept;
 	int		i;
 
@@ -22,22 +16,54 @@ int	manifold_clip(Vec3 *poly, int count, Vec3 n, float off)
 	i = 0;
 	while (i < count)
 	{
-		cur = poly[i];
-		nxt = poly[(i + 1) % count];
-		dc = vec3_dot(n, cur) - off;
-		dn = vec3_dot(n, nxt) - off;
-		if (dc <= 0.0f)
-			out[kept++] = cur;
-		if ((dc < 0.0f && dn > 0.0f) || (dc > 0.0f && dn < 0.0f))
-			out[kept++] = vec3_add(cur, vec3_scale(vec3_sub(nxt, cur), dc / (dc - dn)));   /* [F16] */
+		current = polygon[i];
+		next = polygon[(i + 1) % count];
+		current_side = vec3_dot(normal, current) - offset;
+		next_side = vec3_dot(normal, next) - offset;
+		if (current_side <= 0.0f)
+			kept_points[kept++] = current;
+		if ((current_side < 0.0f && next_side > 0.0f) || (current_side > 0.0f && next_side < 0.0f))
+			kept_points[kept++] = vec3_add(current, vec3_scale(vec3_sub(next, current), current_side / (current_side - next_side)));   // [F16]
 		i++;
 	}
-	memcpy(poly, out, (size_t)kept * sizeof(Vec3));
+	memcpy(polygon, kept_points, (size_t)kept * sizeof(Vec3));
 	return (kept);
 }
 
-/* Best untaken candidate: mode 0 deepest, 1 farthest from p0, 2 largest signed area with p0 p1 on 'side'. */
-static int	pick_point(const Contact *cand, int n, const int *taken, Vec3 axis, Vec3 p0, Vec3 p1, int mode, int side)
+static int	is_chosen(const int *chosen, int chosen_count, int candidate)
+{
+	int	k;
+
+	k = 0;
+	while (k < chosen_count)
+	{
+		if (chosen[k] == candidate)
+			return (1);
+		k++;
+	}
+	return (0);
+}
+
+static int	pick_deepest(const Contact *candidates, int count, const int *chosen, int chosen_count)
+{
+	float	best_score = -1.0f;
+	int		best = -1;
+	int		i;
+
+	i = 0;
+	while (i < count)
+	{
+		if (!is_chosen(chosen, chosen_count, i) && candidates[i].penetration > best_score + MANIFOLD_DEPTH_TOLERANCE)
+		{
+			best_score = candidates[i].penetration;
+			best = i;
+		}
+		i++;
+	}
+	return (best);
+}
+
+static int	pick_farthest(const Contact *candidates, int count, const int *chosen, int chosen_count, Vec3 from)
 {
 	float	best_score = -1.0f;
 	float	score;
@@ -45,64 +71,117 @@ static int	pick_point(const Contact *cand, int n, const int *taken, Vec3 axis, V
 	int		i;
 
 	i = 0;
-	while (i < n)
+	while (i < count)
 	{
-		if (!taken[i])
+		score = vec3_length_sq(vec3_sub(candidates[i].point, from));
+		if (!is_chosen(chosen, chosen_count, i) && score > best_score)
 		{
-			if (mode == 0)
-				score = cand[i].penetration;
-			else if (mode == 1)
-				score = vec3_length_sq(vec3_sub(cand[i].point, p0));
-			else
-				score = (float)side * vec3_dot(axis, vec3_cross(vec3_sub(p1, p0), vec3_sub(cand[i].point, p0)));
-			if (score > best_score)
-			{
-				best_score = score;
-				best = i;
-			}
+			best_score = score;
+			best = i;
 		}
 		i++;
 	}
-	if (mode == 2 && best_score <= 0.000001f)
+	return (best);
+}
+
+// The candidate spanning the largest triangle with the first two picks, on the given side of them; -1 if none does.
+static int	pick_widest(const Contact *candidates, int count, const int *chosen, int chosen_count, Vec3 axis, int side)
+{
+	Vec3	start = candidates[chosen[0]].point;
+	Vec3	end = candidates[chosen[1]].point;
+	float	best_score = -1.0f;
+	float	score;
+	int		best = -1;
+	int		i;
+
+	i = 0;
+	while (i < count)
+	{
+		score = (float)side * vec3_dot(axis, vec3_cross(vec3_sub(end, start), vec3_sub(candidates[i].point, start)));
+		if (!is_chosen(chosen, chosen_count, i) && score > best_score)
+		{
+			best_score = score;
+			best = i;
+		}
+		i++;
+	}
+	if (best_score <= 0.000001f)
 		return (-1);
 	return (best);
 }
 
-/* Deepest point, the one farthest from it, then the largest triangle on each side of those two. */
-int	manifold_reduce(const Contact *cand, int n, Vec3 axis, Contact *out)
+int	manifold_reduce(const Contact *candidates, int count, Vec3 axis, Contact *out)
 {
-	int		taken[12] = {0};
-	int		chosen[4];
-	int		count;
+	int		chosen[4] = {-1, -1, -1, -1};
+	int		chosen_count;
 	int		side;
-	int		k;
+	int		pick;
 
-	if (n <= MAX_CONTACTS_PER_PAIR)
+	if (count <= MAX_CONTACTS_PER_PAIR)
 	{
-		memcpy(out, cand, (size_t)n * sizeof(Contact));
-		return (n);
+		memcpy(out, candidates, (size_t)count * sizeof(Contact));
+		return (count);
 	}
-	chosen[0] = pick_point(cand, n, taken, axis, cand[0].point, cand[0].point, 0, 1);
-	taken[chosen[0]] = 1;
-	chosen[1] = pick_point(cand, n, taken, axis, cand[chosen[0]].point, cand[chosen[0]].point, 1, 1);
-	taken[chosen[1]] = 1;
-	count = 2;
+	chosen[0] = pick_deepest(candidates, count, chosen, 0);
+	chosen[1] = pick_farthest(candidates, count, chosen, 1, candidates[chosen[0]].point);
+	chosen_count = 2;
 	side = 1;
-	while (count < 4 && side >= -1)
+	while (chosen_count < 4 && side >= -1)
 	{
-		k = pick_point(cand, n, taken, axis, cand[chosen[0]].point, cand[chosen[1]].point, 2, side);
-		if (k >= 0)
-		{
-			taken[k] = 1;
-			chosen[count++] = k;
-		}
+		pick = pick_widest(candidates, count, chosen, chosen_count, axis, side);
+		if (pick >= 0)
+			chosen[chosen_count++] = pick;
 		side -= 2;
 	}
-	k = 0;
-	while (k < count)
+	pick = 0;
+	while (pick < chosen_count)
 	{
-		out[k] = cand[chosen[k]];
-		k++;
+		out[pick] = candidates[chosen[pick]];
+		pick++;
 	}
-	return (count);
+	return (chosen_count);
+}
+
+void	manifold_add_candidate(ContactCandidates *set, Vec3 point, Vec3 normal, float depth)
+{
+	int	slot;
+	int	i;
+
+	slot = set->count;
+	if (set->count == MESH_CANDIDATES)
+	{
+		slot = 0;
+		i = 1;
+		while (i < set->count)
+		{
+			if (set->contacts[i].penetration < set->contacts[slot].penetration)
+				slot = i;
+			i++;
+		}
+		if (set->contacts[slot].penetration + MANIFOLD_DEPTH_TOLERANCE >= depth)
+			return ;
+	}
+	else
+		set->count++;
+	set->contacts[slot].point = point;
+	set->contacts[slot].normal = normal;
+	set->contacts[slot].penetration = depth;
+}
+
+int	manifold_reduce_candidates(const ContactCandidates *set, Contact *out)
+{
+	int	deepest;
+	int	i;
+
+	if (set->count == 0)
+		return (0);
+	deepest = 0;
+	i = 1;
+	while (i < set->count)
+	{
+		if (set->contacts[i].penetration > set->contacts[deepest].penetration + MANIFOLD_DEPTH_TOLERANCE)
+			deepest = i;
+		i++;
+	}
+	return (manifold_reduce(set->contacts, set->count, set->contacts[deepest].normal, out));
 }

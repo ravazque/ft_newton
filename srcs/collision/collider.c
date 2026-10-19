@@ -1,105 +1,113 @@
 #include "newton.h"
 
-/*
- * Collider shapes and their world bounds. A plane is the surface normal . x =
- * offset limited to a square of side 'size' (the ground drawn on screen), solid
- * down to PLANE_THICKNESS under it: past its edge nothing holds a body up [F13].
-*/
+// Collider shapes and their world bounds; a plane is solid only over its square and PLANE_THICKNESS under it.
 
 Collider	collider_sphere(float radius)
 {
-	Collider	c;
+	Collider	collider;
 
-	memset(&c, 0, sizeof(c));
-	c.type = SHAPE_SPHERE;
-	c.radius = radius;
-	c.halfExtents = vec3(radius, radius, radius);
-	c.normal = vec3(0.0f, 1.0f, 0.0f);
-	return (c);
+	memset(&collider, 0, sizeof(collider));
+	collider.type = SHAPE_SPHERE;
+	collider.radius = radius;
+	collider.halfExtents = vec3(radius, radius, radius);
+	collider.normal = vec3(0.0f, 1.0f, 0.0f);
+	return (collider);
 }
 
 Collider	collider_box(Vec3 half_extents)
 {
-	Collider	c;
+	Collider	collider;
 
-	memset(&c, 0, sizeof(c));
-	c.type = SHAPE_BOX;
-	c.halfExtents = half_extents;
-	c.normal = vec3(0.0f, 1.0f, 0.0f);
-	return (c);
+	memset(&collider, 0, sizeof(collider));
+	collider.type = SHAPE_BOX;
+	collider.halfExtents = half_extents;
+	collider.normal = vec3(0.0f, 1.0f, 0.0f);
+	return (collider);
 }
 
 Collider	collider_plane(Vec3 normal, float offset, float size)
 {
-	Collider	c;
+	Collider	collider;
 
-	memset(&c, 0, sizeof(c));
-	c.type = SHAPE_PLANE;
-	c.normal = vec3_normalized(normal);
-	c.offset = offset;
-	c.halfSize = size * 0.5f;
-	return (c);
+	memset(&collider, 0, sizeof(collider));
+	collider.type = SHAPE_PLANE;
+	collider.normal = vec3_normalized(normal);
+	collider.offset = offset;
+	collider.halfSize = size * 0.5f;
+	return (collider);
 }
 
-/* Center of the plane's square; the plane's body position plays no part. */
-Vec3	collider_plane_origin(const Collider *c)
+Collider	collider_mesh(const MeshShape *mesh)
 {
-	return (vec3_scale(c->normal, c->offset));
+	Collider	collider;
+
+	memset(&collider, 0, sizeof(collider));
+	collider.type = SHAPE_MESH;
+	collider.mesh = mesh;
+	collider.halfExtents = vec3_scale(vec3_sub(mesh->boundsMax, mesh->boundsMin), 0.5f);
+	collider.normal = vec3(0.0f, 1.0f, 0.0f);
+	return (collider);
 }
 
-/* Turns local +Y onto the normal: the square spans local X and Z. */
-Quat	collider_plane_rotation(const Collider *c)
+Vec3	collider_plane_origin(const Collider *collider)
 {
-	return (quat_from_to(vec3(0.0f, 1.0f, 0.0f), c->normal));
+	return (vec3_scale(collider->normal, collider->offset));
 }
 
-float	collider_plane_distance(const Collider *c, Vec3 point)
+Quat	collider_plane_rotation(const Collider *collider)
 {
-	return (vec3_dot(c->normal, point) - c->offset);   /* [F13] signed distance */
+	return (quat_from_to(vec3(0.0f, 1.0f, 0.0f), collider->normal));
 }
 
-/* Whether the plane's solid slab lies under this point: inside the square and not deeper than
- * its thickness. */
-int	collider_plane_covers(const Collider *c, Vec3 point)
+float	collider_plane_distance(const Collider *collider, Vec3 point)
 {
-	Quat	rotation = collider_plane_rotation(c);
-	Vec3	d = vec3_sub(point, collider_plane_origin(c));
-	float	u = vec3_dot(d, quat_rotate(rotation, vec3(1.0f, 0.0f, 0.0f)));
-	float	v = vec3_dot(d, quat_rotate(rotation, vec3(0.0f, 0.0f, 1.0f)));
-
-	return (fabsf(u) <= c->halfSize && fabsf(v) <= c->halfSize && collider_plane_distance(c, point) >= -PLANE_THICKNESS);   /* [F13] */
+	return (vec3_dot(collider->normal, point) - collider->offset);   // [F13] signed distance
 }
 
-/* AABB of an oriented box: the rotated half extents, |R| . h, axis by axis. */
-static void	oriented_bounds(Vec3 center, Quat rotation, Vec3 h, Vec3 *mn, Vec3 *mx)
+int	collider_plane_covers(const Collider *collider, Vec3 point)
 {
-	Vec3	a0 = quat_rotate(rotation, vec3(1.0f, 0.0f, 0.0f));
-	Vec3	a1 = quat_rotate(rotation, vec3(0.0f, 1.0f, 0.0f));
-	Vec3	a2 = quat_rotate(rotation, vec3(0.0f, 0.0f, 1.0f));
-	Vec3	ex;
+	Quat	rotation = collider_plane_rotation(collider);
+	Vec3	offset = vec3_sub(point, collider_plane_origin(collider));
+	float	along_x = vec3_dot(offset, quat_rotate(rotation, vec3(1.0f, 0.0f, 0.0f)));
+	float	along_z = vec3_dot(offset, quat_rotate(rotation, vec3(0.0f, 0.0f, 1.0f)));
 
-	ex.x = fabsf(a0.x) * h.x + fabsf(a1.x) * h.y + fabsf(a2.x) * h.z;   /* [F10] */
-	ex.y = fabsf(a0.y) * h.x + fabsf(a1.y) * h.y + fabsf(a2.y) * h.z;
-	ex.z = fabsf(a0.z) * h.x + fabsf(a1.z) * h.y + fabsf(a2.z) * h.z;
-	*mn = vec3_sub(center, ex);
-	*mx = vec3_add(center, ex);
+	return (fabsf(along_x) <= collider->halfSize && fabsf(along_z) <= collider->halfSize && collider_plane_distance(collider, point) >= -PLANE_THICKNESS);   // [F13]
 }
 
-/* World AABB of a body; a plane's is its square extruded PLANE_THICKNESS down along the normal. */
-void	collider_bounds(const RigidBody *b, Vec3 *mn, Vec3 *mx)
+static void	oriented_bounds(Vec3 center, Quat rotation, Vec3 half, Vec3 *bounds_min, Vec3 *bounds_max)
 {
-	const Collider	*c = &b->collider;
+	Vec3	axis_x = quat_rotate(rotation, vec3(1.0f, 0.0f, 0.0f));
+	Vec3	axis_y = quat_rotate(rotation, vec3(0.0f, 1.0f, 0.0f));
+	Vec3	axis_z = quat_rotate(rotation, vec3(0.0f, 0.0f, 1.0f));
+	Vec3	extent;
+
+	extent.x = fabsf(axis_x.x) * half.x + fabsf(axis_y.x) * half.y + fabsf(axis_z.x) * half.z;   // [F10]
+	extent.y = fabsf(axis_x.y) * half.x + fabsf(axis_y.y) * half.y + fabsf(axis_z.y) * half.z;
+	extent.z = fabsf(axis_x.z) * half.x + fabsf(axis_y.z) * half.y + fabsf(axis_z.z) * half.z;
+	*bounds_min = vec3_sub(center, extent);
+	*bounds_max = vec3_add(center, extent);
+}
+
+void	collider_bounds(const RigidBody *body, Vec3 *bounds_min, Vec3 *bounds_max)
+{
+	const Collider	*collider = &body->collider;
 	float			half_depth = PLANE_THICKNESS * 0.5f;
-	Vec3			r;
+	Vec3			radius;
+	Vec3			mesh_center;
 
-	if (c->type == SHAPE_SPHERE)
+	if (collider->type == SHAPE_SPHERE)
 	{
-		r = vec3(c->radius, c->radius, c->radius);
-		*mn = vec3_sub(b->position, r);
-		*mx = vec3_add(b->position, r);
+		radius = vec3(collider->radius, collider->radius, collider->radius);
+		*bounds_min = vec3_sub(body->position, radius);
+		*bounds_max = vec3_add(body->position, radius);
 	}
-	else if (c->type == SHAPE_BOX)
-		oriented_bounds(b->position, b->orientation, c->halfExtents, mn, mx);
+	else if (collider->type == SHAPE_BOX)
+		oriented_bounds(body->position, body->orientation, collider->halfExtents, bounds_min, bounds_max);
+	else if (collider->type == SHAPE_MESH)
+	{
+		mesh_center = mesh_to_world(body, vec3_scale(vec3_add(collider->mesh->boundsMin, collider->mesh->boundsMax), 0.5f));
+		oriented_bounds(mesh_center, body->orientation, collider->halfExtents, bounds_min, bounds_max);
+	}
 	else
-		oriented_bounds(vec3_sub(collider_plane_origin(c), vec3_scale(c->normal, half_depth)), collider_plane_rotation(c), vec3(c->halfSize, half_depth, c->halfSize), mn, mx);
+		oriented_bounds(vec3_sub(collider_plane_origin(collider), vec3_scale(collider->normal, half_depth)), collider_plane_rotation(collider), vec3(collider->halfSize, half_depth, collider->halfSize), bounds_min, bounds_max);
 }

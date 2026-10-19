@@ -1,12 +1,10 @@
 #include "newton.h"
 
-/* Scalar helpers shared by the collision, menu and control code. */
-
-float	clampf(float v, float lo, float hi)
+float	clampf(float value, float low, float high)
 {
-	if (v < lo)
-		return (lo);
-	if (v > hi)
-		return (hi);
-	return (v);
+	if (value < low)
+		return (low);
+	if (value > high)
+		return (high);
+	return (value);
 }

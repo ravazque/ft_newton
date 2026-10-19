@@ -1,68 +1,65 @@
 #include "newton.h"
 
-/* Contacts of a sphere against a sphere, a plane and a box: one point each, normal from the
- * sphere toward the other body [F12]-[F14]. */
+// A sphere against a sphere, a plane and a box: one contact each, normal from the sphere toward the other body.
 
-int	contact_sphere_sphere(const RigidBody *a, const RigidBody *b, Contact *out)
+int	contact_sphere_sphere(const RigidBody *sphere_a, const RigidBody *sphere_b, Contact *out)
 {
-	Vec3	d = vec3_sub(b->position, a->position);   /* [F12] */
-	float	sum_r = a->collider.radius + b->collider.radius;
-	float	dist = vec3_length(d);
+	Vec3	offset = vec3_sub(sphere_b->position, sphere_a->position);   // [F12]
+	float	radius_sum = sphere_a->collider.radius + sphere_b->collider.radius;
+	float	distance = vec3_length(offset);
 
-	if (dist > sum_r)
+	if (distance > radius_sum)
 		return (0);
 	out->normal = vec3(0.0f, 1.0f, 0.0f);
-	if (dist > 0.0001f)
-		out->normal = vec3_scale(d, 1.0f / dist);
-	out->penetration = sum_r - dist;
-	out->point = vec3_add(a->position, vec3_scale(out->normal, a->collider.radius - out->penetration * 0.5f));
+	if (distance > 0.0001f)
+		out->normal = vec3_scale(offset, 1.0f / distance);
+	out->penetration = radius_sum - distance;
+	out->point = vec3_add(sphere_a->position, vec3_scale(out->normal, sphere_a->collider.radius - out->penetration * 0.5f));
 	return (1);
 }
 
-/* Touching when the center is closer than the radius to the surface, above the ground square. */
 int	contact_sphere_plane(const RigidBody *sphere, const RigidBody *plane, Contact *out)
 {
-	float	dist = collider_plane_distance(&plane->collider, sphere->position);   /* [F13] */
+	float	distance = collider_plane_distance(&plane->collider, sphere->position);   // [F13]
 
-	if (dist > sphere->collider.radius || !collider_plane_covers(&plane->collider, sphere->position))
+	if (distance > sphere->collider.radius || !collider_plane_covers(&plane->collider, sphere->position))
 		return (0);
 	out->normal = vec3_neg(plane->collider.normal);
-	out->penetration = sphere->collider.radius - dist;
+	out->penetration = sphere->collider.radius - distance;
 	out->point = vec3_add(sphere->position, vec3_scale(out->normal, sphere->collider.radius));
 	return (1);
 }
 
-/* Center inside the box: push out through the nearest face. */
-static int	sphere_inside_box(const RigidBody *sphere, const Obb *o, const float *t, Contact *out)
+// A centre inside the box goes out through the nearest face.
+static int	sphere_inside_box(const RigidBody *sphere, const Obb *box, const float *local, Contact *out)
 {
-	Vec3	dir;
-	int		k;
+	Vec3	direction;
+	int		nearest;
 	int		i;
 
-	k = 0;
+	nearest = 0;
 	i = 1;
 	while (i < 3)
 	{
-		if (o->h[i] - fabsf(t[i]) < o->h[k] - fabsf(t[k]))
-			k = i;
+		if (box->half[i] - fabsf(local[i]) < box->half[nearest] - fabsf(local[nearest]))
+			nearest = i;
 		i++;
 	}
-	dir = o->ax[k];
-	if (t[k] < 0.0f)
-		dir = vec3_neg(dir);
-	out->normal = vec3_neg(dir);
+	direction = box->axis[nearest];
+	if (local[nearest] < 0.0f)
+		direction = vec3_neg(direction);
+	out->normal = vec3_neg(direction);
 	out->point = sphere->position;
-	out->penetration = o->h[k] - fabsf(t[k]) + sphere->collider.radius;
+	out->penetration = box->half[nearest] - fabsf(local[nearest]) + sphere->collider.radius;
 	return (1);
 }
 
-/* Closest point on the box, clamped in the box's own frame: exact for faces, edges and corners alike. */
-int	contact_sphere_box(const RigidBody *sphere, const RigidBody *box, Contact *out)
+int	contact_sphere_box(const RigidBody *sphere, const RigidBody *box_body, Contact *out)
 {
-	Obb		o = obb_from_body(box);
-	Vec3	d = vec3_sub(sphere->position, o.c);
-	Vec3	q = o.c;
-	float	t[3];
+	Obb		box = obb_from_body(box_body);
+	Vec3	offset = vec3_sub(sphere->position, box.center);
+	Vec3	closest = box.center;
+	float	local[3];
 	int		inside;
 	int		i;
 
@@ -70,20 +67,20 @@ int	contact_sphere_box(const RigidBody *sphere, const RigidBody *box, Contact *o
 	i = 0;
 	while (i < 3)
 	{
-		t[i] = vec3_dot(d, o.ax[i]);
-		if (fabsf(t[i]) > o.h[i])
+		local[i] = vec3_dot(offset, box.axis[i]);
+		if (fabsf(local[i]) > box.half[i])
 			inside = 0;
-		t[i] = clampf(t[i], -o.h[i], o.h[i]);                   /* [F14] */
-		q = vec3_add(q, vec3_scale(o.ax[i], t[i]));
+		local[i] = clampf(local[i], -box.half[i], box.half[i]);   // [F14]
+		closest = vec3_add(closest, vec3_scale(box.axis[i], local[i]));
 		i++;
 	}
 	if (inside)
-		return (sphere_inside_box(sphere, &o, t, out));
-	d = vec3_sub(sphere->position, q);
-	if (vec3_length_sq(d) > sphere->collider.radius * sphere->collider.radius)
+		return (sphere_inside_box(sphere, &box, local, out));
+	offset = vec3_sub(sphere->position, closest);
+	if (vec3_length_sq(offset) > sphere->collider.radius * sphere->collider.radius)
 		return (0);
-	out->penetration = sphere->collider.radius - vec3_length(d);
-	out->normal = vec3_neg(vec3_normalized(d));
-	out->point = q;
+	out->penetration = sphere->collider.radius - vec3_length(offset);
+	out->normal = vec3_neg(vec3_normalized(offset));
+	out->point = closest;
 	return (1);
 }

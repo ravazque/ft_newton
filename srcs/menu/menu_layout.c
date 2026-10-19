@@ -1,47 +1,46 @@
 #include "newton.h"
 
-/*
- * Places the panel and every row. The panel covers MENU_PANEL_RATIO of the window
- * in both directions and the content scales with it: everything is measured once
- * in font pixels, the largest scale that fits wins (no whole-number steps, glyph
- * pixels are snapped when drawn), rows stretch a little to fill the height and
- * both columns share the spare width. The rectangles written here are the ones
- * menu_input.c hit-tests and menu_draw.c fills.
-*/
+// Panel and row rectangles: measured in font pixels at scale 1, then drawn at the largest scale the panel fits.
 
-/* Rows of the taller column, counting the gap before each section title after the first. */
-static float	content_lines(const Menu *m)
+static float	content_lines(const Menu *menu)
 {
-	float	lines[2];
+	float	lines[MENU_COLUMNS] = {0};
+	float	tallest;
+	int		column;
 	int		i;
 
-	lines[0] = 0.0f;
-	lines[1] = 0.0f;
 	i = 0;
-	while (i < m->rowCount)
+	while (i < menu->rowCount)
 	{
-		if (m->rows[i].kind == MENU_SECTION && lines[m->rows[i].column] > 0.0f)
-			lines[m->rows[i].column] += 0.4f;
-		lines[m->rows[i].column] += 1.0f;
+		column = menu->rows[i].column;
+		if (menu->rows[i].kind == MENU_SECTION && lines[column] > 0.0f)
+			lines[column] += 0.4f;
+		lines[column] += 1.0f;
 		i++;
 	}
-	return (fmaxf(lines[0], lines[1]));
+	tallest = 0.0f;
+	column = 0;
+	while (column < MENU_COLUMNS)
+	{
+		tallest = fmaxf(tallest, lines[column]);
+		column++;
+	}
+	return (tallest);
 }
 
-/* Font pixels one column needs: its widest label, plus number and buttons for a value row. */
-static float	column_width(const Menu *m, int column)
+static float	column_width(const Menu *menu, int column)
 {
 	float	widest = 0.0f;
 	float	needed;
 	int		i;
 
 	i = 0;
-	while (i < m->rowCount)
+	while (i < menu->rowCount)
 	{
-		if (m->rows[i].column == column)
+		if (menu->rows[i].column == column)
 		{
-			needed = ui_text_width(m->rows[i].label, 1.0f) + 2.0f * FONT_ADVANCE;
-			if (m->rows[i].kind == MENU_VALUE)
+			needed = ui_text_width(menu->rows[i].label, 1.0f) + 2.0f * FONT_ADVANCE;
+			if (menu->rows[i].kind == MENU_VALUE)
 				needed += (MENU_VALUE_CHARS + 2.0f * MENU_BUTTON_CHARS) * FONT_ADVANCE + MENU_BUTTON_GAP;
 			widest = fmaxf(widest, needed);
 		}
@@ -50,70 +49,126 @@ static float	column_width(const Menu *m, int column)
 	return (widest);
 }
 
-/* Font pixels of the whole panel at scale 1: columns side by side, or the title line if wider. */
-static void	natural_size(const Menu *m, float *w, float *h)
+static int	used_columns(const Menu *menu)
 {
-	float	columns = column_width(m, 0) + column_width(m, 1) + 3.0f * MENU_PAD;
-	float	header = ui_text_width(MENU_TITLE, 1.0f) + ui_text_width(MENU_NOTE_DIRTY, 1.0f) + 4.0f * FONT_ADVANCE + 2.0f * MENU_PAD;
+	int	used;
+	int	column;
 
-	*w = fmaxf(columns, header);
-	*h = (content_lines(m) + 1.5f) * MENU_LINE_PIXELS + 2.0f * MENU_PAD;
+	used = 0;
+	column = 0;
+	while (column < MENU_COLUMNS)
+	{
+		if (column_width(menu, column) > 0.0f)
+			used++;
+		column++;
+	}
+	if (used == 0)
+		used = 1;
+	return (used);
 }
 
-static void	place_panel(Menu *m, float width, float height)
+static float	header_width(const Menu *menu)
 {
-	float	natural_w;
-	float	natural_h;
+	float	title = ui_text_width(MENU_TITLE, 1.0f);
+	float	note = fmaxf(ui_text_width(MENU_NOTE_BACK, 1.0f), ui_text_width(MENU_NOTE_DIRTY, 1.0f));
 
-	natural_size(m, &natural_w, &natural_h);
-	m->panelW = width * MENU_PANEL_RATIO;
-	m->panelH = height * MENU_PANEL_RATIO;
-	m->scale = fmaxf(MENU_MIN_SCALE, fminf(m->panelW / natural_w, m->panelH / natural_h));
-	m->panelW = fminf(width, fmaxf(m->panelW, natural_w * m->scale));
-	m->panelH = fminf(height, fmaxf(m->panelH, natural_h * m->scale));
-	m->panelX = (width - m->panelW) * 0.5f;
-	m->panelY = (height - m->panelH) * 0.5f;
-	m->pad = MENU_PAD * m->scale;
-	m->line = (m->panelH - 2.0f * m->pad) / (content_lines(m) + 1.5f);
-	m->line = clampf(m->line, MENU_LINE_PIXELS * m->scale, MENU_LINE_PIXELS * m->scale * MENU_MAX_STRETCH);
+	if (menu->page == MENU_PAGE_MODELS)
+	{
+		title = ui_text_width(MENU_MODELS_TITLE, 1.0f);
+		note = ui_text_width(MENU_NOTE_MODELS, 1.0f);
+	}
+	return (title + note + 4.0f * FONT_ADVANCE + 2.0f * MENU_PADDING);
 }
 
-static void	place_row(Menu *m, MenuRow *row, float x, float y, float w)
+static void	place_panel(Menu *menu, float width, float height)
+{
+	float	natural_width = (float)(used_columns(menu) + 1) * MENU_PADDING;
+	float	natural_height = (content_lines(menu) + 1.5f) * MENU_LINE_PIXELS + 2.0f * MENU_PADDING;
+	int		column;
+
+	column = 0;
+	while (column < MENU_COLUMNS)
+	{
+		natural_width += column_width(menu, column);
+		column++;
+	}
+	natural_width = fmaxf(natural_width, header_width(menu));
+	menu->panelWidth = width * MENU_PANEL_RATIO;
+	menu->panelHeight = height * MENU_PANEL_RATIO;
+	menu->scale = fmaxf(MENU_MIN_SCALE, fminf(menu->panelWidth / natural_width, menu->panelHeight / natural_height));
+	menu->panelWidth = fminf(width, fmaxf(menu->panelWidth, natural_width * menu->scale));
+	menu->panelHeight = fminf(height, fmaxf(menu->panelHeight, natural_height * menu->scale));
+	menu->panelX = (width - menu->panelWidth) * 0.5f;
+	menu->panelY = (height - menu->panelHeight) * 0.5f;
+	menu->padding = MENU_PADDING * menu->scale;
+	menu->lineHeight = (menu->panelHeight - 2.0f * menu->padding) / (content_lines(menu) + 1.5f);
+	menu->lineHeight = clampf(menu->lineHeight, MENU_LINE_PIXELS * menu->scale, MENU_LINE_PIXELS * menu->scale * MENU_MAX_STRETCH);
+}
+
+// The spare width is shared by the used columns; an empty column gets no width and no gap.
+static void	place_columns(const Menu *menu, float *column_widths, float *column_x)
+{
+	float	spare = menu->panelWidth - (float)(used_columns(menu) + 1) * menu->padding;
+	float	next_x = menu->panelX + menu->padding;
+	int		column;
+
+	column = 0;
+	while (column < MENU_COLUMNS)
+	{
+		column_widths[column] = column_width(menu, column) * menu->scale;
+		spare -= column_widths[column];
+		column++;
+	}
+	column = 0;
+	while (column < MENU_COLUMNS)
+	{
+		column_x[column] = next_x;
+		if (column_widths[column] > 0.0f)
+		{
+			column_widths[column] += fmaxf(0.0f, spare / (float)used_columns(menu));
+			next_x += column_widths[column] + menu->padding;
+		}
+		column++;
+	}
+}
+
+static void	place_row(const Menu *menu, MenuRow *row, float x, float y, float width)
 {
 	row->x = x;
 	row->y = y;
-	row->w = w;
-	row->h = m->line;
-	row->buttonW = MENU_BUTTON_CHARS * FONT_ADVANCE * m->scale;
-	row->plusX = row->x + row->w - row->buttonW;
-	row->minusX = row->plusX - row->buttonW - MENU_BUTTON_GAP * m->scale;
+	row->width = width;
+	row->height = menu->lineHeight;
+	row->buttonWidth = MENU_BUTTON_CHARS * FONT_ADVANCE * menu->scale;
+	row->plusX = row->x + row->width - row->buttonWidth;
+	row->minusX = row->plusX - row->buttonWidth - MENU_BUTTON_GAP * menu->scale;
 }
 
-void	menu_layout(Menu *m, float width, float height)
+void	menu_layout(Menu *menu, float width, float height)
 {
-	float	col_w[2];
-	float	spare;
+	float	column_widths[MENU_COLUMNS];
+	float	column_x[MENU_COLUMNS];
+	float	column_y[MENU_COLUMNS];
 	float	top;
-	float	y[2];
+	int		column;
 	int		i;
 
-	place_panel(m, width, height);
-	col_w[0] = column_width(m, 0) * m->scale;
-	col_w[1] = column_width(m, 1) * m->scale;
-	spare = fmaxf(0.0f, (m->panelW - 3.0f * m->pad - col_w[0] - col_w[1]) * 0.5f);
-	col_w[0] += spare;
-	col_w[1] += spare;
-	top = m->panelY + m->pad + 1.5f * m->line;
-	top += fmaxf(0.0f, (m->panelY + m->panelH - m->pad - top - content_lines(m) * m->line) * 0.5f);
-	y[0] = top;
-	y[1] = top;
-	i = 0;
-	while (i < m->rowCount)
+	place_panel(menu, width, height);
+	place_columns(menu, column_widths, column_x);
+	top = menu->panelY + menu->padding + 1.5f * menu->lineHeight;
+	column = 0;
+	while (column < MENU_COLUMNS)
 	{
-		if (m->rows[i].kind == MENU_SECTION && y[m->rows[i].column] > top)
-			y[m->rows[i].column] += 0.4f * m->line;
-		place_row(m, &m->rows[i], m->panelX + m->pad + (float)m->rows[i].column * (col_w[0] + m->pad), y[m->rows[i].column], col_w[m->rows[i].column]);
-		y[m->rows[i].column] += m->line;
+		column_y[column] = top;
+		column++;
+	}
+	i = 0;
+	while (i < menu->rowCount)
+	{
+		column = menu->rows[i].column;
+		if (menu->rows[i].kind == MENU_SECTION && column_y[column] > top)
+			column_y[column] += 0.4f * menu->lineHeight;
+		place_row(menu, &menu->rows[i], column_x[column], column_y[column], column_widths[column]);
+		column_y[column] += menu->lineHeight;
 		i++;
 	}
 }

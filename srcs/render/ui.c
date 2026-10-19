@@ -1,22 +1,16 @@
 #include "newton.h"
 
-/*
- * 2D overlay for the menu, in window pixels from the top-left corner. Panels and
- * glyph pixels are all colored quads batched in one vertex buffer and drawn with
- * a single glDrawArrays, reusing the 3D shader in per-vertex color mode under an
- * orthographic projection.
-*/
+// The 2D overlay, in window pixels from the top-left: every rectangle and glyph pixel batched into one draw call.
 
-/* Window pixels -> clip space, y flipped so it grows downward like a page. */
 static Mat4	ui_projection(float width, float height)
 {
-	Mat4	m = mat4_identity();
+	Mat4	projection = mat4_identity();
 
-	m.m[0] = 2.0f / width;
-	m.m[5] = -2.0f / height;
-	m.m[12] = -1.0f;
-	m.m[13] = 1.0f;
-	return (m);
+	projection.cells[0] = 2.0f / width;
+	projection.cells[5] = -2.0f / height;
+	projection.cells[12] = -1.0f;
+	projection.cells[13] = 1.0f;
+	return (projection);
 }
 
 int	ui_init(Ui *ui)
@@ -60,48 +54,46 @@ void	ui_begin(Ui *ui, float width, float height)
 	ui->height = height;
 }
 
+// The colour travels in the normal slot, so the 3D vertex layout and shader serve the overlay too.
 static void	push_vertex(Ui *ui, float x, float y, Vec3 color)
 {
-	float	*v;
+	float	*vertex;
 
 	if (ui->vertexCount >= UI_MAX_VERTICES)
 		return ;
-	v = ui->vertices + (size_t)ui->vertexCount * UI_VERTEX_FLOATS;
-	v[0] = x;
-	v[1] = y;
-	v[2] = 0.0f;
-	v[3] = color.x;
-	v[4] = color.y;
-	v[5] = color.z;
+	vertex = ui->vertices + (size_t)ui->vertexCount * UI_VERTEX_FLOATS;
+	vertex[0] = x;
+	vertex[1] = y;
+	vertex[2] = 0.0f;
+	vertex[3] = color.x;
+	vertex[4] = color.y;
+	vertex[5] = color.z;
 	ui->vertexCount++;
 }
 
-/* Two triangles; the color rides in the normal slot so the 3D vertex layout is reused. */
-void	ui_rect(Ui *ui, float x, float y, float w, float h, Vec3 color)
+void	ui_rect(Ui *ui, float x, float y, float width, float height, Vec3 color)
 {
 	if (ui->vertexCount + 6 > UI_MAX_VERTICES)
 		return ;
 	push_vertex(ui, x, y, color);
-	push_vertex(ui, x + w, y, color);
-	push_vertex(ui, x + w, y + h, color);
+	push_vertex(ui, x + width, y, color);
+	push_vertex(ui, x + width, y + height, color);
 	push_vertex(ui, x, y, color);
-	push_vertex(ui, x + w, y + h, color);
-	push_vertex(ui, x, y + h, color);
+	push_vertex(ui, x + width, y + height, color);
+	push_vertex(ui, x, y + height, color);
 }
 
-void	ui_border(Ui *ui, float x, float y, float w, float h, float t, Vec3 color)
+void	ui_border(Ui *ui, float x, float y, float width, float height, float thickness, Vec3 color)
 {
-	ui_rect(ui, x, y, w, t, color);
-	ui_rect(ui, x, y + h - t, w, t, color);
-	ui_rect(ui, x, y + t, t, h - 2.0f * t, color);
-	ui_rect(ui, x + w - t, y + t, t, h - 2.0f * t, color);
+	ui_rect(ui, x, y, width, thickness, color);
+	ui_rect(ui, x, y + height - thickness, width, thickness, color);
+	ui_rect(ui, x, y + thickness, thickness, height - 2.0f * thickness, color);
+	ui_rect(ui, x + width - thickness, y + thickness, thickness, height - 2.0f * thickness, color);
 }
 
-/* One quad per set bit of the 8x8 glyph. Edges are snapped to whole screen
- * pixels, so any scale stays sharp and every copy of a letter looks the same. */
-static void	draw_glyph(Ui *ui, char c, float x, float y, float scale, Vec3 color)
+static void	draw_glyph(Ui *ui, char character, float x, float y, float scale, Vec3 color)
 {
-	const unsigned char	*rows = font_glyph(c);
+	const unsigned char	*rows = font_glyph(character);
 	float				left;
 	float				top;
 	int					row;
@@ -148,17 +140,16 @@ float	ui_text_width(const char *text, float scale)
 	return ((float)strlen(text) * FONT_ADVANCE * scale);
 }
 
-/* Uploads the batch and draws it over the scene, depth test off. */
-void	ui_end(Ui *ui, Renderer *r)
+void	ui_end(Ui *ui, Renderer *renderer)
 {
 	if (ui->vertexCount == 0)
 		return ;
 	glDisable(GL_DEPTH_TEST);
-	shader_use(&r->shader);
-	shader_set_mat4(&r->shader, "uProjection", ui_projection(ui->width, ui->height));
-	shader_set_mat4(&r->shader, "uView", mat4_identity());
-	shader_set_mat4(&r->shader, "uModel", mat4_identity());
-	shader_set_int(&r->shader, "uLit", UI_FLAT_COLOR_MODE);
+	shader_use(&renderer->shader);
+	shader_set_mat4(&renderer->shader, "uProjection", ui_projection(ui->width, ui->height));
+	shader_set_mat4(&renderer->shader, "uView", mat4_identity());
+	shader_set_mat4(&renderer->shader, "uModel", mat4_identity());
+	shader_set_int(&renderer->shader, "uLit", UI_FLAT_COLOR_MODE);
 	glBindVertexArray(ui->vao);
 	glBindBuffer(GL_ARRAY_BUFFER, ui->vbo);
 	glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizeiptr)(sizeof(float) * UI_VERTEX_FLOATS * (size_t)ui->vertexCount), ui->vertices);

@@ -1,155 +1,158 @@
 #include "newton.h"
 
-/*
- * Menu input, mouse and keyboard on the same rows: the mouse hit-tests the
- * rectangles of the last layout, holding [-] / [+] repeats like a spin box, the
- * arrows move the cursor and change values, ENTER presses a button. Results of
- * the frame are left in m->pending, m->valueChanged and m->dirty.
-*/
+// Mouse and keyboard on the same rows; a frame's results are left in pending, pendingModel, valueChanged and dirty.
 
-static int	inside(float px, float py, float x, float y, float w, float h)
+static int	point_inside(float point_x, float point_y, float x, float y, float width, float height)
 {
-	return (px >= x && px <= x + w && py >= y && py <= y + h);
+	return (point_x >= x && point_x <= x + width && point_y >= y && point_y <= y + height);
 }
 
-/* hoverPart: 0 = [-], 1 = [+], 2 = an action button. */
-static void	find_hover(Menu *m, float mx, float my)
+static void	find_hover(Menu *menu, float cursor_x, float cursor_y)
 {
 	MenuRow	*row;
 	int		i;
 
-	m->hoverRow = -1;
-	m->hoverPart = -1;
+	menu->hoverRow = -1;
+	menu->hoverPart = -1;
 	i = 0;
-	while (i < m->rowCount)
+	while (i < menu->rowCount)
 	{
-		row = &m->rows[i];
-		if (menu_is_selectable(row) && inside(mx, my, row->x, row->y, row->w, row->h))
+		row = &menu->rows[i];
+		if (menu_is_selectable(row) && point_inside(cursor_x, cursor_y, row->x, row->y, row->width, row->height))
 		{
-			m->hoverRow = i;
+			menu->hoverRow = i;
 			if (row->kind == MENU_ACTION)
-				m->hoverPart = 2;
-			else if (inside(mx, my, row->minusX, row->y, row->buttonW, row->h))
-				m->hoverPart = 0;
-			else if (inside(mx, my, row->plusX, row->y, row->buttonW, row->h))
-				m->hoverPart = 1;
+				menu->hoverPart = 2;
+			else if (point_inside(cursor_x, cursor_y, row->minusX, row->y, row->buttonWidth, row->height))
+				menu->hoverPart = 0;
+			else if (point_inside(cursor_x, cursor_y, row->plusX, row->y, row->buttonWidth, row->height))
+				menu->hoverPart = 1;
 		}
 		i++;
 	}
 }
 
-static void	hold_repeat(Menu *m, float frame_time)
+// Holding [-] or [+] repeats like a spin box: one step on the press, then one every MENU_REPEAT_PERIOD after a delay.
+static void	hold_repeat(Menu *menu, float frame_time)
 {
 	int	direction;
 
-	if (m->heldRow < 0 || m->heldPart > 1)
+	if (menu->heldRow < 0 || menu->heldPart > 1)
 		return ;
-	m->repeatTimer += frame_time;
+	menu->repeatTimer += frame_time;
 	direction = 1;
-	if (m->heldPart == 0)
+	if (menu->heldPart == 0)
 		direction = -1;
-	while (m->repeatTimer >= MENU_REPEAT_DELAY + MENU_REPEAT_PERIOD)
+	while (menu->repeatTimer >= MENU_REPEAT_DELAY + MENU_REPEAT_PERIOD)
 	{
-		menu_step_value(m, &m->rows[m->heldRow], direction);
-		m->repeatTimer -= MENU_REPEAT_PERIOD;
+		menu_step_value(menu, &menu->rows[menu->heldRow], direction);
+		menu->repeatTimer -= MENU_REPEAT_PERIOD;
 	}
 }
 
-static void	press(Menu *m)
+static void	press_button(Menu *menu, const MenuRow *row)
+{
+	menu->pending = row->action;
+	menu->pendingModel = row->model;
+}
+
+static void	press_hovered(Menu *menu)
 {
 	MenuRow	*row;
 
-	if (m->hoverRow < 0)
+	if (menu->hoverRow < 0)
 		return ;
-	m->selected = m->hoverRow;
-	row = &m->rows[m->hoverRow];
-	m->heldRow = m->hoverRow;
-	m->heldPart = m->hoverPart;
-	m->repeatTimer = 0.0f;
-	if (m->hoverPart == 0)
-		menu_step_value(m, row, -1);
-	else if (m->hoverPart == 1)
-		menu_step_value(m, row, 1);
-	else if (m->hoverPart == 2)
-		m->pending = row->action;
+	menu->selected = menu->hoverRow;
+	row = &menu->rows[menu->hoverRow];
+	menu->heldRow = menu->hoverRow;
+	menu->heldPart = menu->hoverPart;
+	menu->repeatTimer = 0.0f;
+	if (menu->hoverPart == 0)
+		menu_step_value(menu, row, -1);
+	else if (menu->hoverPart == 1)
+		menu_step_value(menu, row, 1);
+	else if (menu->hoverPart == 2)
+		press_button(menu, row);
 }
 
-static void	move_selection(Menu *m, int direction)
+static void	move_selection(Menu *menu, int direction)
 {
-	int	i = m->selected;
-	int	guard = 0;
+	int	index = menu->selected;
+	int	tried;
 
-	while (guard < m->rowCount)
+	tried = 0;
+	while (tried < menu->rowCount)
 	{
-		i += direction;
-		if (i < 0)
-			i = m->rowCount - 1;
-		if (i >= m->rowCount)
-			i = 0;
-		if (menu_is_selectable(&m->rows[i]))
+		index += direction;
+		if (index < 0)
+			index = menu->rowCount - 1;
+		if (index >= menu->rowCount)
+			index = 0;
+		if (menu_is_selectable(&menu->rows[index]))
 		{
-			m->selected = i;
+			menu->selected = index;
 			return ;
 		}
-		guard++;
+		tried++;
 	}
 }
 
-static int	key_edge(Window *win, int key, char *state)
+static int	key_pressed(Window *window, int key, char *was_down)
 {
-	int	down = window_key_down(win, key);
+	int	down = window_key_down(window, key);
 
-	if (down && !*state)
+	if (down && !*was_down)
 	{
-		*state = 1;
+		*was_down = 1;
 		return (1);
 	}
 	if (!down)
-		*state = 0;
+		*was_down = 0;
 	return (0);
 }
 
-static void	keyboard(Menu *m, Window *win)
+static void	keyboard(Menu *menu, Window *window)
 {
-	static char	keys[5];
+	static char	keys_down[5];
 	MenuRow		*row;
 
-	if (key_edge(win, GLFW_KEY_UP, &keys[0]))
-		move_selection(m, -1);
-	if (key_edge(win, GLFW_KEY_DOWN, &keys[1]))
-		move_selection(m, 1);
-	if (m->selected < 0 || m->selected >= m->rowCount)
+	if (key_pressed(window, GLFW_KEY_UP, &keys_down[0]))
+		move_selection(menu, -1);
+	if (key_pressed(window, GLFW_KEY_DOWN, &keys_down[1]))
+		move_selection(menu, 1);
+	if (menu->selected < 0 || menu->selected >= menu->rowCount)
 		return ;
-	row = &m->rows[m->selected];
-	if (key_edge(win, GLFW_KEY_LEFT, &keys[2]))
-		menu_step_value(m, row, -1);
-	if (key_edge(win, GLFW_KEY_RIGHT, &keys[3]))
-		menu_step_value(m, row, 1);
-	if (key_edge(win, GLFW_KEY_ENTER, &keys[4]) && row->kind == MENU_ACTION)
-		m->pending = row->action;
+	row = &menu->rows[menu->selected];
+	if (key_pressed(window, GLFW_KEY_LEFT, &keys_down[2]))
+		menu_step_value(menu, row, -1);
+	if (key_pressed(window, GLFW_KEY_RIGHT, &keys_down[3]))
+		menu_step_value(menu, row, 1);
+	if (key_pressed(window, GLFW_KEY_ENTER, &keys_down[4]) && row->kind == MENU_ACTION)
+		press_button(menu, row);
 }
 
-void	menu_update(Menu *m, Window *win, float frame_time)
+void	menu_update(Menu *menu, Window *window, float frame_time)
 {
-	static int	was_down = 0;
-	float		mx;
-	float		my;
-	int			down;
+	static int	mouse_was_down = 0;
+	float		cursor_x;
+	float		cursor_y;
+	int			mouse_down;
 
-	m->pending = ACTION_NONE;
-	m->valueChanged = 0;
-	window_cursor(win, &mx, &my);
-	find_hover(m, mx, my);
-	down = window_mouse_down(win);
-	if (down && !was_down)
-		press(m);
-	if (!down)
+	menu->pending = ACTION_NONE;
+	menu->pendingModel = -1;
+	menu->valueChanged = 0;
+	window_cursor(window, &cursor_x, &cursor_y);
+	find_hover(menu, cursor_x, cursor_y);
+	mouse_down = window_mouse_down(window);
+	if (mouse_down && !mouse_was_down)
+		press_hovered(menu);
+	if (!mouse_down)
 	{
-		m->heldRow = -1;
-		m->heldPart = -1;
-		m->repeatTimer = 0.0f;
+		menu->heldRow = -1;
+		menu->heldPart = -1;
+		menu->repeatTimer = 0.0f;
 	}
-	was_down = down;
-	hold_repeat(m, frame_time);
-	keyboard(m, win);
+	mouse_was_down = mouse_down;
+	hold_repeat(menu, frame_time);
+	keyboard(menu, window);
 }

@@ -1,0 +1,7 @@
+# property,value1,value2,value3
+shape,mesh,,
+size,2,,
+density,100,,
+friction,0.6,,
+elasticity,0.2,,
+color,0.85,0.8,0.72

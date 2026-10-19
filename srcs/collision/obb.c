@@ -1,32 +1,30 @@
 #include "newton.h"
 
-/* A box body seen as an oriented box (center, three world axes, half extents) and the
- * geometric queries the box contacts share. */
+// A box body as an oriented box, and the geometric queries the box contacts share.
 
-Obb	obb_from_body(const RigidBody *b)
+Obb	obb_from_body(const RigidBody *body)
 {
-	Obb	o;
+	Obb	box;
 
-	o.c = b->position;
-	o.ax[0] = quat_rotate(b->orientation, vec3(1.0f, 0.0f, 0.0f));
-	o.ax[1] = quat_rotate(b->orientation, vec3(0.0f, 1.0f, 0.0f));
-	o.ax[2] = quat_rotate(b->orientation, vec3(0.0f, 0.0f, 1.0f));
-	o.h[0] = b->collider.halfExtents.x;
-	o.h[1] = b->collider.halfExtents.y;
-	o.h[2] = b->collider.halfExtents.z;
-	return (o);
+	box.center = body->position;
+	box.axis[0] = quat_rotate(body->orientation, vec3(1.0f, 0.0f, 0.0f));
+	box.axis[1] = quat_rotate(body->orientation, vec3(0.0f, 1.0f, 0.0f));
+	box.axis[2] = quat_rotate(body->orientation, vec3(0.0f, 0.0f, 1.0f));
+	box.half[0] = body->collider.halfExtents.x;
+	box.half[1] = body->collider.halfExtents.y;
+	box.half[2] = body->collider.halfExtents.z;
+	return (box);
 }
 
-/* Half length of the box's shadow on a unit axis. */
-float	obb_radius(const Obb *o, Vec3 n)
+float	obb_radius(const Obb *box, Vec3 direction)
 {
-	return (o->h[0] * fabsf(vec3_dot(o->ax[0], n)) + o->h[1] * fabsf(vec3_dot(o->ax[1], n)) + o->h[2] * fabsf(vec3_dot(o->ax[2], n)));   /* [F15] */
+	return (box->half[0] * fabsf(vec3_dot(box->axis[0], direction)) + box->half[1] * fabsf(vec3_dot(box->axis[1], direction)) + box->half[2] * fabsf(vec3_dot(box->axis[2], direction)));   // [F15]
 }
 
-/* Corner i: bit k of i picks the + or - side along axis k. */
-Vec3	obb_corner(const Obb *o, int i)
+// Bit k of 'corner' picks the + or - side along axis k.
+Vec3	obb_corner(const Obb *box, int corner)
 {
-	Vec3	v = o->c;
+	Vec3	point = box->center;
 	float	sign;
 	int		axis;
 
@@ -34,18 +32,17 @@ Vec3	obb_corner(const Obb *o, int i)
 	while (axis < 3)
 	{
 		sign = -1.0f;
-		if (i & (1 << axis))
+		if (corner & (1 << axis))
 			sign = 1.0f;
-		v = vec3_add(v, vec3_scale(o->ax[axis], sign * o->h[axis]));
+		point = vec3_add(point, vec3_scale(box->axis[axis], sign * box->half[axis]));
 		axis++;
 	}
-	return (v);
+	return (point);
 }
 
-/* The edge along ax[dir_idx] that reaches farthest along n. */
-void	obb_support_edge(const Obb *o, int dir_idx, Vec3 n, Vec3 *p0, Vec3 *p1)
+void	obb_support_edge(const Obb *box, int axis_index, Vec3 direction, Vec3 *start, Vec3 *end)
 {
-	Vec3	p = o->c;
+	Vec3	middle = box->center;
 	float	sign;
 	int		i;
 
@@ -53,12 +50,37 @@ void	obb_support_edge(const Obb *o, int dir_idx, Vec3 n, Vec3 *p0, Vec3 *p1)
 	while (i < 3)
 	{
 		sign = -1.0f;
-		if (vec3_dot(o->ax[i], n) >= 0.0f)
+		if (vec3_dot(box->axis[i], direction) >= 0.0f)
 			sign = 1.0f;
-		if (i != dir_idx)
-			p = vec3_add(p, vec3_scale(o->ax[i], sign * o->h[i]));
+		if (i != axis_index)
+			middle = vec3_add(middle, vec3_scale(box->axis[i], sign * box->half[i]));
 		i++;
 	}
-	*p0 = vec3_sub(p, vec3_scale(o->ax[dir_idx], o->h[dir_idx]));
-	*p1 = vec3_add(p, vec3_scale(o->ax[dir_idx], o->h[dir_idx]));
+	*start = vec3_sub(middle, vec3_scale(box->axis[axis_index], box->half[axis_index]));
+	*end = vec3_add(middle, vec3_scale(box->axis[axis_index], box->half[axis_index]));
+}
+
+void	obb_incident_face(const Obb *box, Vec3 reference_normal, Vec3 *polygon)
+{
+	Vec3	face_normal;
+	Vec3	face_center;
+	int		facing;
+	int		side_u;
+	int		side_v;
+
+	facing = 0;
+	if (fabsf(vec3_dot(box->axis[1], reference_normal)) > fabsf(vec3_dot(box->axis[facing], reference_normal)))
+		facing = 1;
+	if (fabsf(vec3_dot(box->axis[2], reference_normal)) > fabsf(vec3_dot(box->axis[facing], reference_normal)))
+		facing = 2;
+	side_u = (facing + 1) % 3;
+	side_v = (facing + 2) % 3;
+	face_normal = box->axis[facing];
+	if (vec3_dot(face_normal, reference_normal) > 0.0f)
+		face_normal = vec3_neg(face_normal);
+	face_center = vec3_add(box->center, vec3_scale(face_normal, box->half[facing]));
+	polygon[0] = vec3_add(face_center, vec3_add(vec3_scale(box->axis[side_u], box->half[side_u]), vec3_scale(box->axis[side_v], box->half[side_v])));
+	polygon[1] = vec3_add(face_center, vec3_add(vec3_scale(box->axis[side_u], -box->half[side_u]), vec3_scale(box->axis[side_v], box->half[side_v])));
+	polygon[2] = vec3_add(face_center, vec3_add(vec3_scale(box->axis[side_u], -box->half[side_u]), vec3_scale(box->axis[side_v], -box->half[side_v])));
+	polygon[3] = vec3_add(face_center, vec3_add(vec3_scale(box->axis[side_u], box->half[side_u]), vec3_scale(box->axis[side_v], -box->half[side_v])));
 }

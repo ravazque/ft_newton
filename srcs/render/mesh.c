@@ -1,10 +1,9 @@
 #include "newton.h"
 
-/* The three unit meshes every body is drawn with (cube, UV sphere, square), uploaded once to
- * the GPU; the model matrix scales them. */
+// Geometry on the GPU: the unit cube, sphere and square every primitive is drawn with, and one mesh per model.
 
-/* Interleaved position + normal (6 floats per vertex) and an index list -> VBO + EBO + VAO. */
-static Mesh	mesh_upload(const float *verts, int vert_floats, const unsigned int *indices, int index_count)
+// Interleaved position and normal (6 floats per vertex) and an index list, into a vertex buffer, index buffer and vertex array.
+static Mesh	mesh_upload(const float *vertices, int vertex_floats, const unsigned int *indices, int index_count)
 {
 	Mesh	mesh;
 	GLsizei	stride;
@@ -16,7 +15,7 @@ static Mesh	mesh_upload(const float *verts, int vert_floats, const unsigned int 
 	glGenBuffers(1, &mesh.ebo);
 	glBindVertexArray(mesh.vao);
 	glBindBuffer(GL_ARRAY_BUFFER, mesh.vbo);
-	glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)((size_t)vert_floats * sizeof(float)), verts, GL_STATIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)((size_t)vertex_floats * sizeof(float)), vertices, GL_STATIC_DRAW);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh.ebo);
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)((size_t)index_count * sizeof(unsigned int)), indices, GL_STATIC_DRAW);
 	stride = 6 * (GLsizei)sizeof(float);
@@ -30,124 +29,161 @@ static Mesh	mesh_upload(const float *verts, int vert_floats, const unsigned int 
 
 Mesh	mesh_cube(void)
 {
-	const float		h = 0.5f;
-	const float		verts[] = {
-		h, -h, -h, 1, 0, 0, h, h, -h, 1, 0, 0,
-		h, h, h, 1, 0, 0, h, -h, h, 1, 0, 0,
-		-h, -h, h, -1, 0, 0, -h, h, h, -1, 0, 0,
-		-h, h, -h, -1, 0, 0, -h, -h, -h, -1, 0, 0,
-		-h, h, -h, 0, 1, 0, -h, h, h, 0, 1, 0,
-		h, h, h, 0, 1, 0, h, h, -h, 0, 1, 0,
-		-h, -h, h, 0, -1, 0, -h, -h, -h, 0, -1, 0,
-		h, -h, -h, 0, -1, 0, h, -h, h, 0, -1, 0,
-		-h, -h, h, 0, 0, 1, h, -h, h, 0, 0, 1,
-		h, h, h, 0, 0, 1, -h, h, h, 0, 0, 1,
-		h, -h, -h, 0, 0, -1, -h, -h, -h, 0, 0, -1,
-		-h, h, -h, 0, 0, -1, h, h, -h, 0, 0, -1};
+	const float		half = 0.5f;
+	const float		vertices[] = {
+		half, -half, -half, 1, 0, 0, half, half, -half, 1, 0, 0,
+		half, half, half, 1, 0, 0, half, -half, half, 1, 0, 0,
+		-half, -half, half, -1, 0, 0, -half, half, half, -1, 0, 0,
+		-half, half, -half, -1, 0, 0, -half, -half, -half, -1, 0, 0,
+		-half, half, -half, 0, 1, 0, -half, half, half, 0, 1, 0,
+		half, half, half, 0, 1, 0, half, half, -half, 0, 1, 0,
+		-half, -half, half, 0, -1, 0, -half, -half, -half, 0, -1, 0,
+		half, -half, -half, 0, -1, 0, half, -half, half, 0, -1, 0,
+		-half, -half, half, 0, 0, 1, half, -half, half, 0, 0, 1,
+		half, half, half, 0, 0, 1, -half, half, half, 0, 0, 1,
+		half, -half, -half, 0, 0, -1, -half, -half, -half, 0, 0, -1,
+		-half, half, -half, 0, 0, -1, half, half, -half, 0, 0, -1};
 	unsigned int	indices[36];
-	unsigned int	f;
-	unsigned int	o;
+	unsigned int	face;
+	unsigned int	first;
 
-	f = 0;
-	while (f < 6)
+	face = 0;
+	while (face < 6)
 	{
-		o = f * 6;
-		indices[o + 0] = f * 4 + 0;
-		indices[o + 1] = f * 4 + 1;
-		indices[o + 2] = f * 4 + 2;
-		indices[o + 3] = f * 4 + 0;
-		indices[o + 4] = f * 4 + 2;
-		indices[o + 5] = f * 4 + 3;
-		f++;
+		first = face * 6;
+		indices[first + 0] = face * 4 + 0;
+		indices[first + 1] = face * 4 + 1;
+		indices[first + 2] = face * 4 + 2;
+		indices[first + 3] = face * 4 + 0;
+		indices[first + 4] = face * 4 + 2;
+		indices[first + 5] = face * 4 + 3;
+		face++;
 	}
-	return (mesh_upload(verts, 24 * 6, indices, 36));
+	return (mesh_upload(vertices, 24 * 6, indices, 36));
+}
+
+static void	sphere_vertices(float *vertices, int segments)
+{
+	float	ring_radius;
+	float	height;
+	float	angle;
+	int		written;
+	int		ring;
+	int		slice;
+
+	written = 0;
+	ring = 0;
+	while (ring <= segments)
+	{
+		height = 0.5f * cosf(FTN_PI * (float)ring / (float)segments);
+		ring_radius = 0.5f * sinf(FTN_PI * (float)ring / (float)segments);
+		slice = 0;
+		while (slice <= segments)
+		{
+			angle = 2.0f * FTN_PI * (float)slice / (float)segments;
+			vertices[written++] = ring_radius * cosf(angle);
+			vertices[written++] = height;
+			vertices[written++] = ring_radius * sinf(angle);
+			vertices[written++] = ring_radius * cosf(angle) / 0.5f;
+			vertices[written++] = height / 0.5f;
+			vertices[written++] = ring_radius * sinf(angle) / 0.5f;
+			slice++;
+		}
+		ring++;
+	}
+}
+
+static void	sphere_indices(unsigned int *indices, int segments)
+{
+	int	written;
+	int	ring;
+	int	slice;
+
+	written = 0;
+	ring = 0;
+	while (ring < segments)
+	{
+		slice = 0;
+		while (slice < segments)
+		{
+			indices[written++] = (unsigned int)(ring * (segments + 1) + slice);
+			indices[written++] = (unsigned int)((ring + 1) * (segments + 1) + slice);
+			indices[written++] = (unsigned int)(ring * (segments + 1) + slice + 1);
+			indices[written++] = (unsigned int)(ring * (segments + 1) + slice + 1);
+			indices[written++] = (unsigned int)((ring + 1) * (segments + 1) + slice);
+			indices[written++] = (unsigned int)((ring + 1) * (segments + 1) + slice + 1);
+			slice++;
+		}
+		ring++;
+	}
 }
 
 Mesh	mesh_sphere(int segments)
 {
-	float			*verts;
-	unsigned int	*idx;
+	float			*vertices;
+	unsigned int	*indices;
 	Mesh			mesh;
-	int				i;
-	int				j;
-	int				v;
-	int				o;
-	float			phi;
-	float			theta;
-	float			y;
-	float			ring;
-	float			px;
-	float			pz;
-	const float		radius = 0.5f;
 
 	if (segments < 3)
 		segments = 3;
-	verts = malloc((size_t)(segments + 1) * (segments + 1) * 6 * sizeof(float));
-	idx = malloc((size_t)segments * segments * 6 * sizeof(unsigned int));
-	if (!verts || !idx)
-	{
-		free(verts);
-		free(idx);
-		memset(&mesh, 0, sizeof(mesh));
-		return (mesh);
-	}
-	v = 0;
-	i = 0;
-	while (i <= segments)
-	{
-		phi = FTN_PI * (float)i / (float)segments;
-		y = radius * cosf(phi);
-		ring = radius * sinf(phi);
-		j = 0;
-		while (j <= segments)
-		{
-			theta = 2.0f * FTN_PI * (float)j / (float)segments;
-			px = ring * cosf(theta);
-			pz = ring * sinf(theta);
-			verts[v++] = px;
-			verts[v++] = y;
-			verts[v++] = pz;
-			verts[v++] = px / radius;
-			verts[v++] = y / radius;
-			verts[v++] = pz / radius;
-			j++;
-		}
-		i++;
-	}
-	o = 0;
-	i = 0;
-	while (i < segments)
-	{
-		j = 0;
-		while (j < segments)
-		{
-			idx[o++] = (unsigned int)(i * (segments + 1) + j);
-			idx[o++] = (unsigned int)((i + 1) * (segments + 1) + j);
-			idx[o++] = (unsigned int)(i * (segments + 1) + j + 1);
-			idx[o++] = (unsigned int)(i * (segments + 1) + j + 1);
-			idx[o++] = (unsigned int)((i + 1) * (segments + 1) + j);
-			idx[o++] = (unsigned int)((i + 1) * (segments + 1) + j + 1);
-			j++;
-		}
-		i++;
-	}
-	mesh = mesh_upload(verts, (segments + 1) * (segments + 1) * 6, idx, segments * segments * 6);
-	free(verts);
-	free(idx);
+	vertices = malloc((size_t)(segments + 1) * (segments + 1) * 6 * sizeof(float));
+	indices = malloc((size_t)segments * segments * 6 * sizeof(unsigned int));
+	memset(&mesh, 0, sizeof(mesh));
+	if (!vertices || !indices)
+		return (free(vertices), free(indices), mesh);
+	sphere_vertices(vertices, segments);
+	sphere_indices(indices, segments);
+	mesh = mesh_upload(vertices, (segments + 1) * (segments + 1) * 6, indices, segments * segments * 6);
+	free(vertices);
+	free(indices);
 	return (mesh);
 }
 
 Mesh	mesh_plane(void)
 {
-	const float			h = 0.5f;
-	const float			verts[] = {
-		-h, 0.0f, -h, 0.0f, 1.0f, 0.0f,
-		h, 0.0f, -h, 0.0f, 1.0f, 0.0f,
-		h, 0.0f, h, 0.0f, 1.0f, 0.0f,
-		-h, 0.0f, h, 0.0f, 1.0f, 0.0f};
+	const float			half = 0.5f;
+	const float			vertices[] = {
+		-half, 0.0f, -half, 0.0f, 1.0f, 0.0f,
+		half, 0.0f, -half, 0.0f, 1.0f, 0.0f,
+		half, 0.0f, half, 0.0f, 1.0f, 0.0f,
+		-half, 0.0f, half, 0.0f, 1.0f, 0.0f};
 	const unsigned int	indices[] = {0, 1, 2, 0, 2, 3};
 
-	return (mesh_upload(verts, 4 * 6, indices, 6));
+	return (mesh_upload(vertices, 4 * 6, indices, 6));
+}
+
+Mesh	mesh_from_shape(const MeshShape *shape)
+{
+	float			*vertices = malloc((size_t)shape->triangleCount * 18 * sizeof(float));
+	unsigned int	*indices = malloc((size_t)shape->triangleCount * 3 * sizeof(unsigned int));
+	Mesh			mesh;
+	Vec3			position;
+	Vec3			normal;
+	int				written;
+	int				corner;
+
+	memset(&mesh, 0, sizeof(mesh));
+	if (!vertices || !indices)
+		return (free(vertices), free(indices), mesh);
+	written = 0;
+	corner = 0;
+	while (corner < shape->triangleCount * 3)
+	{
+		position = shape->vertices[shape->corners[corner]];
+		normal = shape->faceNormals[corner / 3];
+		vertices[written++] = position.x;
+		vertices[written++] = position.y;
+		vertices[written++] = position.z;
+		vertices[written++] = normal.x;
+		vertices[written++] = normal.y;
+		vertices[written++] = normal.z;
+		indices[corner] = (unsigned int)corner;
+		corner++;
+	}
+	mesh = mesh_upload(vertices, shape->triangleCount * 18, indices, shape->triangleCount * 3);
+	free(vertices);
+	free(indices);
+	return (mesh);
 }
 
 void	mesh_draw(const Mesh *mesh)

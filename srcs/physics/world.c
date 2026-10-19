@@ -1,152 +1,149 @@
 #include "newton.h"
 
-/*
- * The world owns every body and advances them one fixed step at a time:
- * integrate -> broad-phase -> narrow-phase -> contact response -> sleep -> cull.
- * The per-step pipeline lives in srcs/collision, srcs/response and sleep.c / cull.c.
-*/
+// The world owns every body and joint; one step runs integrate, broad-phase, narrow-phase, response, sleep and cull.
 
-void	world_init(World *w)
+void	world_init(World *world)
 {
-	memset(w, 0, sizeof(*w));
-	w->gravity = vec3(0.0f, GRAVITY_Y, 0.0f);
-	w->solverIterations = SOLVER_ITERATIONS;
+	memset(world, 0, sizeof(*world));
+	world->gravity = vec3(0.0f, GRAVITY_Y, 0.0f);
+	world->solverIterations = SOLVER_ITERATIONS;
 }
 
-void	world_destroy(World *w)
+void	world_destroy(World *world)
 {
-	free(w->bodies);
-	free(w->pairs);
-	free(w->contacts);
-	free(w->prevContacts);
-	free(w->islandParent);
-	free(w->islandTimer);
-	free(w->startPositions);
-	free(w->rotationDelta);
-	memset(w, 0, sizeof(*w));
+	free(world->bodies);
+	free(world->joints);
+	free(world->pairs);
+	free(world->contacts);
+	free(world->previousContacts);
+	free(world->islandParent);
+	free(world->islandTimer);
+	free(world->startPositions);
+	free(world->rotationDelta);
+	memset(world, 0, sizeof(*world));
 }
 
-int	world_add_body(World *w, RigidBody body)
+int	world_add_body(World *world, RigidBody body)
 {
 	RigidBody	*grown;
 	int			new_capacity;
 
-	if (w->bodyCount == w->bodyCapacity)
+	if (world->bodyCount == world->bodyCapacity)
 	{
 		new_capacity = 16;
-		if (w->bodyCapacity > 0)
-			new_capacity = w->bodyCapacity * 2;
-		grown = realloc(w->bodies, (size_t)new_capacity * sizeof(RigidBody));
+		if (world->bodyCapacity > 0)
+			new_capacity = world->bodyCapacity * 2;
+		grown = realloc(world->bodies, (size_t)new_capacity * sizeof(RigidBody));
 		if (!grown)
 			return (-1);
-		w->bodies = grown;
-		w->bodyCapacity = new_capacity;
+		world->bodies = grown;
+		world->bodyCapacity = new_capacity;
 	}
-	w->bodies[w->bodyCount] = body;
-	return (w->bodyCount++);
+	world->bodies[world->bodyCount] = body;
+	return (world->bodyCount++);
 }
 
-/* Warm-start memory is keyed by body index: contacts of the removed body and
- * of the one that takes its slot would otherwise feed their impulses to the wrong pair. */
-static void	forget_contacts(World *w, int removed, int moved)
+static void	forget_contacts(World *world, int removed, int moved)
 {
-	const Contact	*c;
+	const Contact	*contact;
 	int				kept;
 	int				i;
 
 	kept = 0;
 	i = 0;
-	while (i < w->prevContactCount)
+	while (i < world->previousContactCount)
 	{
-		c = &w->prevContacts[i];
-		if (c->a != removed && c->b != removed && c->a != moved && c->b != moved)
-			w->prevContacts[kept++] = *c;
+		contact = &world->previousContacts[i];
+		if (contact->bodyA != removed && contact->bodyB != removed && contact->bodyA != moved && contact->bodyB != moved)
+			world->previousContacts[kept++] = *contact;
 		i++;
 	}
-	w->prevContactCount = kept;
+	world->previousContactCount = kept;
 }
 
-/* O(1) swap-with-last removal: the last body takes the freed index. */
-void	world_remove_body(World *w, int handle)
+// Swap-with-last removal: the remembered contacts and the joints keyed by the two indices follow.
+void	world_remove_body(World *world, int index)
 {
 	int	last;
 
-	if (handle < 0 || handle >= w->bodyCount)
+	if (index < 0 || index >= world->bodyCount)
 		return ;
-	last = w->bodyCount - 1;
-	w->bodies[handle] = w->bodies[last];
-	w->bodyCount--;
-	forget_contacts(w, handle, last);
+	last = world->bodyCount - 1;
+	world->bodies[index] = world->bodies[last];
+	world->bodyCount--;
+	forget_contacts(world, index, last);
+	joint_forget_body(world, index, last);
 }
 
-void	world_clear(World *w)
+void	world_clear(World *world)
 {
-	w->bodyCount = 0;
-	w->prevContactCount = 0;
+	world->bodyCount = 0;
+	world->jointCount = 0;
+	world->ragdollCount = 0;
+	world->previousContactCount = 0;
 }
 
-/* Used when the rules change under resting bodies (gravity, materials, reset). */
-void	world_wake_all(World *w)
+void	world_wake_all(World *world)
 {
 	int	i;
 
 	i = 0;
-	while (i < w->bodyCount)
+	while (i < world->bodyCount)
 	{
-		w->bodies[i].awake = 1;
-		w->bodies[i].sleepTimer = 0.0f;
+		world->bodies[i].awake = 1;
+		world->bodies[i].sleepTimer = 0.0f;
+		world->bodies[i].creepTimer = 0.0f;
 		i++;
 	}
 }
 
-/* The per-body scratch arrays only grow, and only when the body count does. */
-int	world_grow_scratch(World *w)
+int	world_grow_scratch(World *world)
 {
 	int		*parent;
 	float	*timer;
 	Vec3	*positions;
 	Vec3	*rotations;
 
-	if (w->bodyCount <= w->scratchCapacity)
+	if (world->bodyCount <= world->scratchCapacity)
 		return (1);
-	parent = realloc(w->islandParent, (size_t)w->bodyCount * sizeof(int));
+	parent = realloc(world->islandParent, (size_t)world->bodyCount * sizeof(int));
 	if (parent)
-		w->islandParent = parent;
-	timer = realloc(w->islandTimer, (size_t)w->bodyCount * sizeof(float));
+		world->islandParent = parent;
+	timer = realloc(world->islandTimer, (size_t)world->bodyCount * sizeof(float));
 	if (timer)
-		w->islandTimer = timer;
-	positions = realloc(w->startPositions, (size_t)w->bodyCount * sizeof(Vec3));
+		world->islandTimer = timer;
+	positions = realloc(world->startPositions, (size_t)world->bodyCount * sizeof(Vec3));
 	if (positions)
-		w->startPositions = positions;
-	rotations = realloc(w->rotationDelta, (size_t)w->bodyCount * sizeof(Vec3));
+		world->startPositions = positions;
+	rotations = realloc(world->rotationDelta, (size_t)world->bodyCount * sizeof(Vec3));
 	if (rotations)
-		w->rotationDelta = rotations;
+		world->rotationDelta = rotations;
 	if (!parent || !timer || !positions || !rotations)
 		return (0);
-	w->scratchCapacity = w->bodyCount;
+	world->scratchCapacity = world->bodyCount;
 	return (1);
 }
 
-/* One fixed step. A non-positive dt (pause, time scale 0) leaves the world untouched. */
-void	world_step(World *w, float dt)
+void	world_step(World *world, float dt)
 {
 	int	i;
 
 	if (dt <= 0.0f)
 		return ;
+	world->dt = dt;
 	i = 0;
-	while (i < w->bodyCount)
+	while (i < world->bodyCount)
 	{
-		if (w->bodies[i].awake)
+		if (world->bodies[i].awake)
 		{
-			integrator_integrate(&w->bodies[i], w->gravity, dt);
-			rb_clear_accumulators(&w->bodies[i]);
+			integrator_integrate(&world->bodies[i], world->gravity, dt);
+			rigidbody_clear_accumulators(&world->bodies[i]);
 		}
 		i++;
 	}
-	broadphase_compute_pairs(w);
-	narrowphase_generate_contacts(w);
-	resolver_resolve(w);
-	sleep_update(w, dt);
-	cull_lost_bodies(w);
+	broadphase_compute_pairs(world);
+	narrowphase_generate_contacts(world);
+	resolver_resolve(world);
+	sleep_update(world, dt);
+	cull_lost_bodies(world);
 }

@@ -1,96 +1,134 @@
 #include "newton.h"
 
-/*
- * Sleeping, decided per contact island (dynamic bodies linked by contacts; static
- * bodies link nothing). An island sleeps only when ALL its bodies stayed below both
- * speed thresholds for SLEEP_TIME [F24]: sleeping one box of a pile alone would drop
- * the support of its neighbours and kick the pile every time they wake it again.
-*/
+// An island (bodies linked by contacts or joints, found by union-find) sleeps when all its bodies stayed still long enough.
 
-static int	island_root(int *parent, int i)
+static int	island_root(int *parent, int index)
 {
-	while (parent[i] != i)
+	while (parent[index] != index)
 	{
-		parent[i] = parent[parent[i]];
-		i = parent[i];
+		parent[index] = parent[parent[index]];
+		index = parent[index];
 	}
-	return (i);
+	return (index);
 }
 
-static int	is_dynamic_awake(const RigidBody *b)
+static int	is_dynamic_awake(const RigidBody *body)
 {
-	return (b->invMass > 0.0f && b->awake);
+	return (body->inverseMass > 0.0f && body->awake);
 }
 
-/* Each awake dynamic body accumulates how long it has been still. */
-static void	accumulate_rest(World *w, float dt)
+static float	turned_since(Quat from, Quat to)
 {
-	RigidBody	*b;
-	float		lin;
-	float		ang;
+	Quat	change = quat_mul(to, quat_conjugate(from));
+
+	return (2.0f * acosf(fminf(1.0f, fabsf(change.w))));
+}
+
+// Still: slow, or shaking in place: little net move, and past the first half of SLEEP_TIME a path SLEEP_JITTER_RATIO times longer.
+static int	at_rest(RigidBody *body, float dt)
+{
+	float	allowance;
+	float	moved;
+	float	turned;
+	int		settling;
+	int		linear_still;
+	int		angular_still;
+
+	if (body->sleepTimer == 0.0f || body->restWindow >= 2.0f * SLEEP_TIME)
+	{
+		body->restPosition = body->position;
+		body->restOrientation = body->orientation;
+		body->restPath = 0.0f;
+		body->restTurnPath = 0.0f;
+		body->restWindow = 0.0f;
+	}
+	body->restWindow += dt;
+	body->restPath += vec3_length(body->velocity) * dt;
+	body->restTurnPath += vec3_length(body->angularVelocity) * dt;
+	allowance = fmaxf(body->restWindow, SLEEP_TIME);
+	moved = vec3_length(vec3_sub(body->position, body->restPosition));
+	turned = turned_since(body->restOrientation, body->orientation);
+	settling = (body->restWindow < 0.5f * SLEEP_TIME);
+	body->creepTimer += dt;
+	if (moved >= SLEEP_CREEP_FACTOR * SLEEP_LINEAR_EPS * allowance || turned >= SLEEP_CREEP_FACTOR * SLEEP_ANGULAR_EPS * allowance)
+		body->creepTimer = 0.0f;
+	linear_still = (vec3_length(body->velocity) < SLEEP_LINEAR_EPS || (moved < SLEEP_LINEAR_EPS * allowance && (settling || body->restPath > SLEEP_JITTER_RATIO * moved)));
+	angular_still = (vec3_length(body->angularVelocity) < SLEEP_ANGULAR_EPS || (turned < SLEEP_ANGULAR_EPS * allowance && (settling || body->restTurnPath > SLEEP_JITTER_RATIO * turned)));
+	return (linear_still && angular_still);
+}
+
+static void	accumulate_rest(World *world, float dt)
+{
+	RigidBody	*body;
 	int			i;
 
-	lin = SLEEP_LINEAR_EPS * SLEEP_LINEAR_EPS;
-	ang = SLEEP_ANGULAR_EPS * SLEEP_ANGULAR_EPS;
 	i = 0;
-	while (i < w->bodyCount)
+	while (i < world->bodyCount)
 	{
-		b = &w->bodies[i];
-		w->islandParent[i] = i;
-		w->islandTimer[i] = SLEEP_TIME;
-		if (is_dynamic_awake(b) && vec3_length_sq(b->velocity) < lin && vec3_length_sq(b->angularVelocity) < ang)   /* [F24] */
-			b->sleepTimer += dt;
-		else if (is_dynamic_awake(b))
-			b->sleepTimer = 0.0f;
+		body = &world->bodies[i];
+		world->islandParent[i] = i;
+		world->islandTimer[i] = SLEEP_TIME;
+		if (is_dynamic_awake(body) && at_rest(body, dt))   // [F24]
+			body->sleepTimer += dt;
+		else if (is_dynamic_awake(body))
+			body->sleepTimer = 0.0f;
 		i++;
 	}
 }
 
-/* Union-find over the contacts, then each island keeps its least rested body's time. */
-static void	build_islands(World *w)
+static void	join_islands(World *world, int body_a, int body_b)
 {
-	const Contact	*c;
-	int				root;
-	int				i;
+	if (world->bodies[body_a].inverseMass > 0.0f && world->bodies[body_b].inverseMass > 0.0f)
+		world->islandParent[island_root(world->islandParent, body_a)] = island_root(world->islandParent, body_b);
+}
+
+static void	build_islands(World *world)
+{
+	int	root;
+	int	i;
 
 	i = 0;
-	while (i < w->contactCount)
+	while (i < world->contactCount)
 	{
-		c = &w->contacts[i];
-		if (w->bodies[c->a].invMass > 0.0f && w->bodies[c->b].invMass > 0.0f)
-			w->islandParent[island_root(w->islandParent, c->a)] = island_root(w->islandParent, c->b);
+		join_islands(world, world->contacts[i].bodyA, world->contacts[i].bodyB);
 		i++;
 	}
 	i = 0;
-	while (i < w->bodyCount)
+	while (i < world->jointCount)
 	{
-		if (is_dynamic_awake(&w->bodies[i]))
+		join_islands(world, world->joints[i].bodyA, world->joints[i].bodyB);
+		i++;
+	}
+	i = 0;
+	while (i < world->bodyCount)
+	{
+		if (is_dynamic_awake(&world->bodies[i]))
 		{
-			root = island_root(w->islandParent, i);
-			w->islandTimer[root] = fminf(w->islandTimer[root], w->bodies[i].sleepTimer);
+			root = island_root(world->islandParent, i);
+			world->islandTimer[root] = fminf(world->islandTimer[root], fmaxf(world->bodies[i].sleepTimer, world->bodies[i].creepTimer * SLEEP_TIME / SLEEP_CREEP_TIME));
 		}
 		i++;
 	}
 }
 
-void	sleep_update(World *w, float dt)
+void	sleep_update(World *world, float dt)
 {
-	RigidBody	*b;
+	RigidBody	*body;
 	int			i;
 
-	if (!world_grow_scratch(w))
+	if (!world_grow_scratch(world))
 		return ;
-	accumulate_rest(w, dt);
-	build_islands(w);
+	accumulate_rest(world, dt);
+	build_islands(world);
 	i = 0;
-	while (i < w->bodyCount)
+	while (i < world->bodyCount)
 	{
-		b = &w->bodies[i];
-		if (is_dynamic_awake(b) && w->islandTimer[island_root(w->islandParent, i)] >= SLEEP_TIME)
+		body = &world->bodies[i];
+		if (is_dynamic_awake(body) && world->islandTimer[island_root(world->islandParent, i)] >= SLEEP_TIME)
 		{
-			b->awake = 0;
-			b->velocity = vec3(0.0f, 0.0f, 0.0f);
-			b->angularVelocity = vec3(0.0f, 0.0f, 0.0f);
+			body->awake = 0;
+			body->velocity = vec3(0.0f, 0.0f, 0.0f);
+			body->angularVelocity = vec3(0.0f, 0.0f, 0.0f);
 		}
 		i++;
 	}

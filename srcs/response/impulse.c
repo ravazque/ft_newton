@@ -1,141 +1,144 @@
 #include "newton.h"
 
-/*
- * Sequential impulses on one contact [F17]-[F22] [F26]. Every direction is solved
- * the same way: the impulse that would cancel the relative velocity along it is
- * added to the accumulated total, the TOTAL is clamped (normal >= 0: contacts only
- * push; friction and rolling within their bounds) and only the difference is
- * applied. Clamping the total instead of each increment is what lets stacks converge.
-*/
+// Sequential impulses of one contact [F17]-[F22] [F26]: each accumulated total is clamped, only the change is applied.
 
-static Vec3	point_velocity(const RigidBody *b, Vec3 r)
+static Vec3	point_velocity(const RigidBody *body, Vec3 arm)
 {
-	return (vec3_add(b->velocity, vec3_cross(b->angularVelocity, r)));   /* [F17] v + w x r */
+	return (vec3_add(body->velocity, vec3_cross(body->angularVelocity, arm)));   // [F17] v + w x r
 }
 
-static Vec3	relative_velocity(const RigidBody *a, const RigidBody *b, const Contact *c)
+static Vec3	relative_velocity(const RigidBody *body_a, const RigidBody *body_b, const Contact *contact)
 {
-	return (vec3_sub(point_velocity(b, vec3_sub(c->point, b->position)), point_velocity(a, vec3_sub(c->point, a->position))));   /* [F18] */
+	return (vec3_sub(point_velocity(body_b, vec3_sub(contact->point, body_b->position)), point_velocity(body_a, vec3_sub(contact->point, body_a->position))));   // [F18]
 }
 
-/* Impulse needed per unit of velocity change along 'dir', rotation included; 0 when neither body can move. */
-static float	effective_mass(const RigidBody *a, const RigidBody *b, const Contact *c, Vec3 dir)
+static float	effective_mass(const RigidBody *body_a, const RigidBody *body_b, const Contact *contact, Vec3 direction)
 {
-	Vec3	ra = vec3_sub(c->point, a->position);
-	Vec3	rb = vec3_sub(c->point, b->position);
-	Vec3	ta = vec3_cross(mat3_mul_vec3(a->invInertiaWorld, vec3_cross(ra, dir)), ra);
-	Vec3	tb = vec3_cross(mat3_mul_vec3(b->invInertiaWorld, vec3_cross(rb, dir)), rb);
-	float	k = a->invMass + b->invMass + vec3_dot(vec3_add(ta, tb), dir);   /* [F19] */
+	Vec3	arm_a = vec3_sub(contact->point, body_a->position);
+	Vec3	arm_b = vec3_sub(contact->point, body_b->position);
+	Vec3	turn_a = vec3_cross(mat3_mul_vec3(body_a->inverseInertiaWorld, vec3_cross(arm_a, direction)), arm_a);
+	Vec3	turn_b = vec3_cross(mat3_mul_vec3(body_b->inverseInertiaWorld, vec3_cross(arm_b, direction)), arm_b);
+	float	inverse_a = contact->scaleA * (body_a->inverseMass + vec3_dot(turn_a, direction));
+	float	inverse = inverse_a + contact->scaleB * (body_b->inverseMass + vec3_dot(turn_b, direction));   // [F19] [F39]
 
-	if (k <= 0.0f)
+	if (inverse <= 0.0f)
 		return (0.0f);
-	return (1.0f / k);
+	return (1.0f / inverse);
 }
 
-/* The same for a pure spin about 'axis'. */
-static float	angular_mass(const RigidBody *a, const RigidBody *b, Vec3 axis)
+static float	angular_mass(const RigidBody *body_a, const RigidBody *body_b, const Contact *contact, Vec3 axis)
 {
-	float	k = vec3_dot(axis, mat3_mul_vec3(a->invInertiaWorld, axis)) + vec3_dot(axis, mat3_mul_vec3(b->invInertiaWorld, axis));   /* [F26] */
+	float	inverse_a = contact->scaleA * vec3_dot(axis, mat3_mul_vec3(body_a->inverseInertiaWorld, axis));
+	float	inverse = inverse_a + contact->scaleB * vec3_dot(axis, mat3_mul_vec3(body_b->inverseInertiaWorld, axis));   // [F26]
 
-	if (k <= 0.0f)
+	if (inverse <= 0.0f)
 		return (0.0f);
-	return (1.0f / k);
+	return (1.0f / inverse);
 }
 
-static void	tangent_basis(Vec3 n, Vec3 *t1, Vec3 *t2)
+static void	tangent_basis(Vec3 normal, Vec3 *tangent1, Vec3 *tangent2)
 {
-	if (fabsf(n.x) >= 0.57735f)
-		*t1 = vec3_normalized(vec3(n.y, -n.x, 0.0f));
+	if (fabsf(normal.x) >= 0.57735f)
+		*tangent1 = vec3_normalized(vec3(normal.y, -normal.x, 0.0f));
 	else
-		*t1 = vec3_normalized(vec3(0.0f, n.z, -n.y));
-	*t2 = vec3_cross(n, *t1);
+		*tangent1 = vec3_normalized(vec3(0.0f, normal.z, -normal.y));
+	*tangent2 = vec3_cross(normal, *tangent1);
 }
 
-/* Only a sphere rolls: its coefficient times its radius bounds the resisting spin impulse per
- * unit of normal impulse. */
-static float	rolling_arm(const RigidBody *b)
+static float	rolling_arm(const RigidBody *body)
 {
-	if (b->collider.type != SHAPE_SPHERE)
+	if (body->collider.type != SHAPE_SPHERE)
 		return (0.0f);
-	return (b->rollingResistance * b->collider.radius);
+	return (body->rollingResistance * body->collider.radius);
 }
 
-/* The elasticity target is read BEFORE any impulse of the step: warm starts would otherwise
- * look like impacts. */
-void	impulse_prepare(const World *w, Contact *c)
+static void	limit_mass_ratio(const World *world, const RigidBody *body_a, const RigidBody *body_b, Contact *contact)
 {
-	const RigidBody	*a = &w->bodies[c->a];
-	const RigidBody	*b = &w->bodies[c->b];
-	float			vn;
+	float	up_along_normal;
 
-	tangent_basis(c->normal, &c->t1, &c->t2);
-	c->massNormal = effective_mass(a, b, c, c->normal);
-	c->massT1 = effective_mass(a, b, c, c->t1);
-	c->massT2 = effective_mass(a, b, c, c->t2);
-	c->massR1 = angular_mass(a, b, c->t1);
-	c->massR2 = angular_mass(a, b, c->t2);
-	c->massRn = angular_mass(a, b, c->normal);
-	c->rolling = fmaxf(rolling_arm(a), rolling_arm(b));									/* [F26] */
-	vn = vec3_dot(relative_velocity(a, b, c), c->normal);								/* [F18] */
-	c->bias = 0.0f;
-	if (vn < -ELASTICITY_THRESHOLD)
-		c->bias = -fmaxf(a->elasticity, b->elasticity) * vn;							/* [F20] */
-	c->jn = 0.0f;
-	c->jt1 = 0.0f;
-	c->jt2 = 0.0f;
-	c->jr1 = 0.0f;
-	c->jr2 = 0.0f;
-	c->jrn = 0.0f;
+	contact->scaleA = 1.0f;
+	contact->scaleB = 1.0f;
+	if (body_a->inverseMass == 0.0f || body_b->inverseMass == 0.0f || vec3_length_sq(world->gravity) == 0.0f)
+		return ;
+	up_along_normal = -vec3_dot(contact->normal, vec3_normalized(world->gravity));
+	if (body_a->inverseMass > MASS_RATIO_LIMIT * body_b->inverseMass && up_along_normal > SUPPORT_COSINE)
+		contact->scaleA = fmaxf(MASS_RATIO_LIMIT * body_b->inverseMass / body_a->inverseMass, MASS_SCALE_FLOOR);   // [F39]
+	else if (body_b->inverseMass > MASS_RATIO_LIMIT * body_a->inverseMass && up_along_normal < -SUPPORT_COSINE)
+		contact->scaleB = fmaxf(MASS_RATIO_LIMIT * body_a->inverseMass / body_b->inverseMass, MASS_SCALE_FLOOR);   // [F39]
 }
 
-/* Equal and opposite impulses at the contact point. */
-void	impulse_apply(RigidBody *a, RigidBody *b, const Contact *c, Vec3 impulse)
+// The elasticity target is read before any impulse of the step, so warm starts do not look like impacts.
+void	impulse_prepare(const World *world, Contact *contact)
 {
-	rb_apply_impulse_at_point(a, vec3_neg(impulse), c->point);
-	rb_apply_impulse_at_point(b, impulse, c->point);
+	const RigidBody	*body_a = &world->bodies[contact->bodyA];
+	const RigidBody	*body_b = &world->bodies[contact->bodyB];
+	float			approach;
+
+	limit_mass_ratio(world, body_a, body_b, contact);
+	tangent_basis(contact->normal, &contact->tangent1, &contact->tangent2);
+	contact->massNormal = effective_mass(body_a, body_b, contact, contact->normal);
+	contact->massTangent1 = effective_mass(body_a, body_b, contact, contact->tangent1);
+	contact->massTangent2 = effective_mass(body_a, body_b, contact, contact->tangent2);
+	contact->massRoll1 = angular_mass(body_a, body_b, contact, contact->tangent1);
+	contact->massRoll2 = angular_mass(body_a, body_b, contact, contact->tangent2);
+	contact->massSpin = angular_mass(body_a, body_b, contact, contact->normal);
+	contact->rollingArm = fmaxf(rolling_arm(body_a), rolling_arm(body_b));   // [F26]
+	approach = vec3_dot(relative_velocity(body_a, body_b, contact), contact->normal);   // [F18]
+	contact->restitutionBias = 0.0f;
+	if (approach < -ELASTICITY_THRESHOLD)
+		contact->restitutionBias = -fmaxf(body_a->elasticity, body_b->elasticity) * approach;   // [F20]
+	contact->impulseNormal = 0.0f;
+	contact->impulseTangent1 = 0.0f;
+	contact->impulseTangent2 = 0.0f;
+	contact->impulseRoll1 = 0.0f;
+	contact->impulseRoll2 = 0.0f;
+	contact->impulseSpin = 0.0f;
 }
 
-static void	solve_tangent(RigidBody *a, RigidBody *b, const Contact *c, Vec3 t, float mass, float *accum, float limit)
+void	impulse_apply(RigidBody *body_a, RigidBody *body_b, const Contact *contact, Vec3 impulse)
 {
-	float	old = *accum;
-	float	lambda = -mass * vec3_dot(relative_velocity(a, b, c), t);
-
-	*accum = clampf(old + lambda, -limit, limit);   /* [F22] |jt| <= mu jn */
-	impulse_apply(a, b, c, vec3_scale(t, *accum - old));
+	rigidbody_apply_impulse_at_point(body_a, vec3_scale(impulse, -contact->scaleA), contact->point);
+	rigidbody_apply_impulse_at_point(body_b, vec3_scale(impulse, contact->scaleB), contact->point);
 }
 
-/* Rolling resistance: an opposing spin impulse about a tangent axis (rolling) or the normal
- * (spinning in place, which friction never sees), bounded by c_rr * r * jn. */
-static void	solve_rolling(RigidBody *a, RigidBody *b, Vec3 axis, float mass, float *accum, float limit)
+static void	solve_tangent(RigidBody **bodies, const Contact *contact, Vec3 tangent, float mass, float *accumulated, float limit)
 {
-	float	old = *accum;
-	float	lambda = -mass * vec3_dot(vec3_sub(b->angularVelocity, a->angularVelocity), axis);
+	float	previous = *accumulated;
+	float	lambda = -mass * vec3_dot(relative_velocity(bodies[0], bodies[1], contact), tangent);
+
+	*accumulated = clampf(previous + lambda, -limit, limit);   // [F22] |jt| <= mu jn
+	impulse_apply(bodies[0], bodies[1], contact, vec3_scale(tangent, *accumulated - previous));
+}
+
+static void	solve_rolling(RigidBody **bodies, const Contact *contact, Vec3 axis, float mass, float *accumulated, float limit)
+{
+	float	previous = *accumulated;
+	float	lambda = -mass * vec3_dot(vec3_sub(bodies[1]->angularVelocity, bodies[0]->angularVelocity), axis);
 	Vec3	spin;
 
-	*accum = clampf(old + lambda, -limit, limit);   /* [F26] |jr| <= c_rr r jn */
-	spin = vec3_scale(axis, *accum - old);
-	rb_apply_angular_impulse(a, vec3_neg(spin));
-	rb_apply_angular_impulse(b, spin);
+	*accumulated = clampf(previous + lambda, -limit, limit);   // [F26] |jr| <= c_rr r jn
+	spin = vec3_scale(axis, *accumulated - previous);
+	rigidbody_apply_angular_impulse(bodies[0], vec3_scale(spin, -contact->scaleA));
+	rigidbody_apply_angular_impulse(bodies[1], vec3_scale(spin, contact->scaleB));
 }
 
-void	impulse_solve(World *w, Contact *c)
+void	impulse_solve(World *world, Contact *contact)
 {
-	RigidBody	*a = &w->bodies[c->a];
-	RigidBody	*b = &w->bodies[c->b];
-	float		mu = sqrtf(a->friction * b->friction);   /* [F22] mu = sqrt(mu_a mu_b) */
-	float		old;
+	RigidBody	*bodies[2] = {&world->bodies[contact->bodyA], &world->bodies[contact->bodyB]};
+	float		friction = sqrtf(bodies[0]->friction * bodies[1]->friction);   // [F22] mu = sqrt(mu_a mu_b)
+	float		previous;
 	float		lambda;
 
-	if (c->rolling > 0.0f)
+	if (contact->rollingArm > 0.0f)
 	{
-		solve_rolling(a, b, c->t1, c->massR1, &c->jr1, c->rolling * c->jn);
-		solve_rolling(a, b, c->t2, c->massR2, &c->jr2, c->rolling * c->jn);
-		solve_rolling(a, b, c->normal, c->massRn, &c->jrn, c->rolling * c->jn);
+		solve_rolling(bodies, contact, contact->tangent1, contact->massRoll1, &contact->impulseRoll1, contact->rollingArm * contact->impulseNormal);
+		solve_rolling(bodies, contact, contact->tangent2, contact->massRoll2, &contact->impulseRoll2, contact->rollingArm * contact->impulseNormal);
+		solve_rolling(bodies, contact, contact->normal, contact->massSpin, &contact->impulseSpin, contact->rollingArm * contact->impulseNormal);
 	}
-	solve_tangent(a, b, c, c->t1, c->massT1, &c->jt1, mu * c->jn);
-	solve_tangent(a, b, c, c->t2, c->massT2, &c->jt2, mu * c->jn);
-	lambda = c->massNormal * (c->bias - vec3_dot(relative_velocity(a, b, c), c->normal));   /* [F21] */
-	old = c->jn;
-	c->jn = fmaxf(old + lambda, 0.0f);                                                      /* [F21] push only */
-	impulse_apply(a, b, c, vec3_scale(c->normal, c->jn - old));                             /* [F9] */
+	solve_tangent(bodies, contact, contact->tangent1, contact->massTangent1, &contact->impulseTangent1, friction * contact->impulseNormal);
+	solve_tangent(bodies, contact, contact->tangent2, contact->massTangent2, &contact->impulseTangent2, friction * contact->impulseNormal);
+	lambda = contact->massNormal * (contact->restitutionBias - vec3_dot(relative_velocity(bodies[0], bodies[1], contact), contact->normal));   // [F21]
+	previous = contact->impulseNormal;
+	contact->impulseNormal = fmaxf(previous + lambda, 0.0f);                                                                             // [F21] push only
+	impulse_apply(bodies[0], bodies[1], contact, vec3_scale(contact->normal, contact->impulseNormal - previous));                         // [F9]
 }

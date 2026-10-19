@@ -63,7 +63,7 @@ out vec4 FragColor;
 
 | `uLit` | Mode | Used for |
 |---|---|---|
-| `1` | lit: `uColor * (0.25 + 0.85 * max(dot(n, -lightDir), 0))` | every body of the scene |
+| `1` | lit: `uColor * (0.25 + 0.85 * max(dot(n, -lightDirection), 0))` | every body of the scene |
 | `0` | flat: `uColor` as is | collider wireframes, the aim bar |
 | `2` | per-vertex color: the value in `vNormalWorld` is the color | the menu overlay |
 
@@ -72,7 +72,7 @@ out vec4 FragColor;
 One fixed directional light, like the sun, coming from `(-0.4, -1, -0.3)`:
 
 - **ambient** 0.25: every surface gets some light, so faces turned away are dark but not black;
-- **diffuse** (Lambert): `max(dot(normal, -lightDir), 0)` is 1 for a face turned straight at the light and 0 for one at 90° or more, scaled by 0.85.
+- **diffuse** (Lambert): `max(dot(normal, -lightDirection), 0)` is 1 for a face turned straight at the light and 0 for one at 90° or more, scaled by 0.85.
 
 Because the cube has a separate normal per face, each face of a block gets a flat, distinct shade, which is what makes blocks read as solid.
 

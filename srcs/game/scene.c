@@ -1,117 +1,111 @@
 #include "newton.h"
 
-/*
- * What is in the world: the four object files loaded into definitions, the
- * starting scene built from them (ground, trebuchet, one pyramid), and the
- * material of existing bodies re-stamped when a definition changes. Files whose
- * starting scene would overlap or leave the pyramid off the ground are refused.
-*/
+// What is in the world: the object files read into definitions, the starting scene, and edits stamped on live bodies.
 
 static void	report_missing(void)
 {
-	fprintf(stderr, "%s, %s, %s and %s are all required and must be valid\n", ASSET_APPLE, ASSET_BLOCK, ASSET_GROUND, ASSET_TREBUCHET);
+	fprintf(stderr, "every %s*.csv file is required and must be valid\n", ASSET_DIR);
 }
 
-/* Builds the starting scene aside: the pyramid must not have to be lifted (it would sit inside the
- * trebuchet or the ground) and every block must stand over the ground square. */
-int	scene_check_start(const ObjectDef *ground, const ObjectDef *block, const Trebuchet *trebuchet)
-{
-	World		w;
-	Trebuchet	t = *trebuchet;
-	float		lift;
-	int			first;
-	int			ok;
-
-	world_init(&w);
-	world_add_body(&w, objectdef_make_body(ground, vec3(0.0f, 0.0f, 0.0f)));
-	trebuchet_build(&t, &w);
-	first = w.bodyCount;
-	lift = structure_spawn_pyramid(&w, block, vec3(STRUCTURE_X, 0.0f, 0.0f), START_PYRAMID_ROWS);
-	ok = (lift == 0.0f);
-	if (!ok)
-		fprintf(stderr, "%s, %s, %s: the starting pyramid at x=%g would overlap the trebuchet or sink into the ground\n", ASSET_BLOCK, ASSET_TREBUCHET, ASSET_GROUND, (double)STRUCTURE_X);
-	while (ok && first < w.bodyCount)
-		ok = collider_plane_covers(&w.bodies[0].collider, w.bodies[first++].position);
-	if (lift == 0.0f && !ok)
-		fprintf(stderr, "%s, %s: the starting pyramid at x=%g is not over the ground square\n", ASSET_BLOCK, ASSET_GROUND, (double)STRUCTURE_X);
-	world_destroy(&w);
-	return (ok);
-}
-
-/* Loaded into temporaries first, so a broken file leaves the running definitions untouched. */
-int	scene_load_assets(Game *g)
+static int	load_definitions(Game *game)
 {
 	ObjectDef	apple;
 	ObjectDef	block;
 	ObjectDef	ground;
 	Trebuchet	trebuchet;
+	RagdollDef	ragdoll;
+	ObjectDef	model;
 
-	if (!objectdef_load(&apple, ASSET_APPLE, KIND_APPLE) || !objectdef_load(&block, ASSET_BLOCK, KIND_BLOCK) || !objectdef_load(&ground, ASSET_GROUND, KIND_GROUND))
+	if (!object_def_load(&apple, ASSET_APPLE, KIND_APPLE) || !object_def_load(&block, ASSET_BLOCK, KIND_BLOCK))
 		return (report_missing(), 0);
-	if (!trebuchet_load(&trebuchet, ASSET_TREBUCHET, &apple))
+	if (!object_def_load(&ground, ASSET_GROUND, KIND_GROUND) || !object_def_load(&model, ASSET_MODELS, KIND_MODEL))
 		return (report_missing(), 0);
-	if (ground.shape != SHAPE_PLANE || apple.shape != SHAPE_SPHERE || block.shape != SHAPE_BOX)
-		return (fprintf(stderr, "%s must be a plane, %s a sphere and %s a box\n", ASSET_GROUND, ASSET_APPLE, ASSET_BLOCK), 0);
+	if (!trebuchet_load(&trebuchet, ASSET_TREBUCHET, &apple) || !ragdoll_load(&ragdoll, ASSET_RAGDOLL))
+		return (report_missing(), 0);
+	if (ground.shape != SHAPE_PLANE || apple.shape != SHAPE_SPHERE || block.shape != SHAPE_BOX || model.shape != SHAPE_MESH)
+		return (fprintf(stderr, "%s must be a plane, %s a sphere, %s a box and %s a mesh\n", ASSET_GROUND, ASSET_APPLE, ASSET_BLOCK, ASSET_MODELS), 0);
 	if (!scene_check_start(&ground, &block, &trebuchet))
 		return (0);
-	g->appleDef = apple;
-	g->blockDef = block;
-	g->groundDef = ground;
-	g->trebuchetDef = trebuchet;
+	game->appleDef = apple;
+	game->blockDef = block;
+	game->groundDef = ground;
+	game->trebuchetDef = trebuchet;
+	game->ragdollDef = ragdoll;
+	game->modelDef = model;
 	return (1);
 }
 
-/* The starting scene; everything spawned or fired before is gone. */
-void	scene_build(Game *g)
+int	scene_load_assets(Game *game)
 {
-	world_clear(&g->world);
-	g->trebuchet = g->trebuchetDef;
-	world_add_body(&g->world, objectdef_make_body(&g->groundDef, vec3(0.0f, 0.0f, 0.0f)));
-	trebuchet_build(&g->trebuchet, &g->world);
-	structure_spawn_pyramid(&g->world, &g->blockDef, vec3(STRUCTURE_X, 0.0f, 0.0f), START_PYRAMID_ROWS);
-	g->paused = 0;
-	g->hud.refresh = 1;
+	int	first_load = (game->modelDef.shape != SHAPE_MESH);
+
+	if (!load_definitions(game))
+		return (0);
+	if (first_load)
+		return (model_library_load(&game->models, game->modelDef.modelSize));
+	return (1);
 }
 
-/* material = (friction, elasticity, rolling resistance); the mass goes through rb_set_mass so
- * the inertia follows. */
-static void	restamp_bodies(World *w, ObjectKind kind, float mass, Vec3 material, Vec3 color)
+void	scene_build(Game *game)
 {
-	RigidBody	*b;
-	int			i;
+	world_clear(&game->world);
+	game->trebuchet = game->trebuchetDef;
+	world_add_body(&game->world, object_def_make_body(&game->groundDef, vec3(0.0f, 0.0f, 0.0f)));
+	trebuchet_build(&game->trebuchet, &game->world);
+	structure_spawn_pyramid(&game->world, &game->blockDef, vec3(STRUCTURE_X, 0.0f, 0.0f), START_PYRAMID_ROWS);
+	game->paused = 0;
+	game->hud.refresh = 1;
+}
 
-	i = 0;
-	while (i < w->bodyCount)
+static void	stamp_material(RigidBody *body, float friction, float elasticity, Vec3 color)
+{
+	body->friction = friction;
+	body->elasticity = elasticity;
+	body->color = color;
+}
+
+static void	stamp_body(Game *game, RigidBody *body)
+{
+	const ObjectDef	*def = NULL;
+
+	if (body->kind == KIND_APPLE)
+		def = &game->appleDef;
+	else if (body->kind == KIND_BLOCK)
+		def = &game->blockDef;
+	else if (body->kind == KIND_GROUND)
+		def = &game->groundDef;
+	if (def)
 	{
-		b = &w->bodies[i];
-		if (b->kind == kind)
-		{
-			b->friction = material.x;
-			b->elasticity = material.y;
-			b->rollingResistance = material.z;
-			b->color = color;
-			if (b->invMass > 0.0f)
-				rb_set_mass(b, mass);
-		}
-		i++;
+		stamp_material(body, def->friction, def->elasticity, def->color);
+		body->rollingResistance = def->rollingResistance;
+		if (body->inverseMass > 0.0f)
+			rigidbody_set_mass(body, def->mass);
+	}
+	else if (body->kind == KIND_TREBUCHET)
+		stamp_material(body, game->trebuchet.friction, game->trebuchet.elasticity, game->trebuchet.color);
+	else if (body->kind == KIND_RAGDOLL)
+	{
+		stamp_material(body, game->ragdollDef.friction, game->ragdollDef.elasticity, game->ragdollDef.color);
+		rigidbody_set_mass(body, game->ragdollDef.mass * ragdoll_mass_share(body->ragdollPart));
+	}
+	else if (body->kind == KIND_MODEL)
+	{
+		stamp_material(body, game->modelDef.friction, game->modelDef.elasticity, game->modelDef.color);
+		rigidbody_set_mass(body, game->modelDef.density * body->collider.mesh->volume);
 	}
 }
 
-static Vec3	def_material(const ObjectDef *d)
+void	scene_apply_definitions(Game *game)
 {
-	return (vec3(d->friction, d->elasticity, d->rollingResistance));
-}
+	int	i;
 
-/* Mass and material (not geometry) of the current definitions onto every existing body. */
-void	scene_apply_definitions(Game *g)
-{
-	Vec3	trebuchet_material = vec3(g->trebuchet.friction, g->trebuchet.elasticity, 0.0f);
-
-	restamp_bodies(&g->world, KIND_APPLE, g->appleDef.mass, def_material(&g->appleDef), g->appleDef.color);
-	restamp_bodies(&g->world, KIND_BLOCK, g->blockDef.mass, def_material(&g->blockDef), g->blockDef.color);
-	restamp_bodies(&g->world, KIND_GROUND, 0.0f, def_material(&g->groundDef), g->groundDef.color);
-	restamp_bodies(&g->world, KIND_TREBUCHET, 0.0f, trebuchet_material, g->trebuchet.color);
-	g->trebuchet.projectileMass = g->appleDef.mass;
-	g->trebuchet.projectileRadius = g->appleDef.radius;
-	g->trebuchet.spawnDistance = trebuchet_spawn_distance(&g->trebuchet);
+	i = 0;
+	while (i < game->world.bodyCount)
+	{
+		stamp_body(game, &game->world.bodies[i]);
+		i++;
+	}
+	game->trebuchet.projectileMass = game->appleDef.mass;
+	game->trebuchet.projectileRadius = game->appleDef.radius;
+	game->trebuchet.spawnDistance = trebuchet_spawn_distance(&game->trebuchet);
 }

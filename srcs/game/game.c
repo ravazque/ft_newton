@@ -1,62 +1,80 @@
 #include "newton.h"
 
-/*
- * The application: start-up, the main loop and shut-down. Each frame reads the
- * input (input.c), advances the simulation in fixed 1/120 s steps, draws
- * (draw.c, hud.c) and sleeps off the rest of the frame, so the physics never
- * depends on the display rate.
-*/
+// Start-up, main loop and shut-down: each frame reads the input, runs fixed physics steps, draws and sleeps the rest.
 
-int	game_init(Game *g, int argc, char **argv)
+static void	release_meshes(Game *game)
 {
-	memset(g, 0, sizeof(*g));
-	g->camera = camera_default();
-	check_input(argc, argv, &g->camera);
-	if (!scene_load_assets(g))
-		return (0);
-	if (!window_init(&g->window, g->camera.win_width, g->camera.win_height, WIN_TITLE))
-		return (0);
-	if (!renderer_init(&g->renderer))
-		return (window_destroy(&g->window), 0);
-	if (!ui_init(&g->ui))
-		return (window_destroy(&g->window), 0);
-	world_init(&g->world);
-	menu_rows_build(g);
-	g->hud = hud_default();
-	g->fixedDt = FIXED_DT;
-	g->timeScale = 1.0f;
-	g->planeMesh = mesh_plane();
-	g->sphereMesh = mesh_sphere(SPHERE_SEGMENTS);
-	g->cubeMesh = mesh_cube();
-	scene_build(g);
-	action_sync_draft(g);
+	int	i;
+
+	mesh_release(&game->meshes.plane);
+	mesh_release(&game->meshes.sphere);
+	mesh_release(&game->meshes.cube);
+	i = 0;
+	while (i < MODEL_MAX)
+	{
+		mesh_release(&game->meshes.models[i]);
+		i++;
+	}
+}
+
+static void	upload_meshes(Game *game)
+{
+	int	i;
+
+	game->meshes.plane = mesh_plane();
+	game->meshes.sphere = mesh_sphere(SPHERE_SEGMENTS);
+	game->meshes.cube = mesh_cube();
+	i = 0;
+	while (i < game->models.count)
+	{
+		game->meshes.models[i] = mesh_from_shape(&game->models.shapes[i]);
+		i++;
+	}
+}
+
+int	game_init(Game *game, int argc, char **argv)
+{
+	memset(game, 0, sizeof(*game));
+	game->camera = camera_default();
+	arguments_read(argc, argv, &game->camera);
+	if (!scene_load_assets(game))
+		return (model_library_free(&game->models), 0);
+	if (!window_init(&game->window, game->camera.windowWidth, game->camera.windowHeight, WIN_TITLE))
+		return (model_library_free(&game->models), 0);
+	if (!renderer_init(&game->renderer) || !ui_init(&game->ui))
+		return (ui_destroy(&game->ui), window_destroy(&game->window), model_library_free(&game->models), 0);
+	world_init(&game->world);
+	game->hud = hud_default();
+	game->fixedDt = FIXED_DT;
+	game->timeScale = 1.0f;
+	upload_meshes(game);
+	scene_build(game);
+	action_sync_draft(game);
+	menu_rows_build(game);
 	return (1);
 }
 
-void	game_shutdown(Game *g)
+void	game_shutdown(Game *game)
 {
-	ui_destroy(&g->ui);
-	mesh_release(&g->planeMesh);
-	mesh_release(&g->sphereMesh);
-	mesh_release(&g->cubeMesh);
-	world_destroy(&g->world);
-	window_destroy(&g->window);
+	ui_destroy(&game->ui);
+	release_meshes(game);
+	world_destroy(&game->world);
+	model_library_free(&game->models);
+	window_destroy(&game->window);
 }
 
-/* The time scale stretches the simulated time of a frame, never the step: at 4x
- * the world takes four times as many steps, so a fast apple still cannot skip
- * through a block. A scene too heavy to keep up drops time instead of piling it up. */
-static void	step_world(Game *g, float *accumulator, float frame_time)
+// The time scale stretches a frame's simulated time, never the step; a scene too heavy to keep up drops time.
+static void	step_world(Game *game, float *accumulator, float frame_time)
 {
 	int	steps;
 
-	if (!g->paused)
-		*accumulator += frame_time * g->timeScale;
+	if (!game->paused)
+		*accumulator += frame_time * game->timeScale;
 	steps = 0;
-	while (*accumulator >= g->fixedDt && steps < MAX_STEPS_PER_FRAME)
+	while (*accumulator >= game->fixedDt && steps < MAX_STEPS_PER_FRAME)
 	{
-		world_step(&g->world, g->fixedDt);
-		*accumulator -= g->fixedDt;
+		world_step(&game->world, game->fixedDt);
+		*accumulator -= game->fixedDt;
 		steps++;
 	}
 	if (steps == MAX_STEPS_PER_FRAME)
@@ -76,26 +94,27 @@ static void	limit_frame_rate(double frame_start)
 	nanosleep(&pause, NULL);
 }
 
-void	game_run(Game *g)
+void	game_run(Game *game)
 {
-	double	prev = glfwGetTime();
+	double	previous = glfwGetTime();
 	double	now;
 	float	accumulator = 0.0f;
 	float	frame_time;
 
-	while (!window_should_close(&g->window))
+	while (!window_should_close(&game->window))
 	{
-		window_poll_events(&g->window);
+		window_poll_events(&game->window);
 		now = glfwGetTime();
-		frame_time = fminf((float)(now - prev), 0.25f);
-		prev = now;
-		input_poll(g, frame_time);
-		if (g->quit)
+		frame_time = fminf((float)(now - previous), 0.25f);
+		previous = now;
+		input_poll(game, frame_time);
+		if (game->quit)
 			break ;
-		step_world(g, &accumulator, frame_time);
-		hud_update(&g->hud, frame_time);
-		draw_frame(g);
-		window_swap_buffers(&g->window);
+		step_world(game, &accumulator, frame_time);
+		camera_keep_clear(&game->camera, &game->world);
+		hud_update(&game->hud, frame_time);
+		draw_frame(game);
+		window_swap_buffers(&game->window);
 		limit_frame_rate(now);
 	}
 }
