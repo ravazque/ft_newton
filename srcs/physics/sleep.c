@@ -24,6 +24,24 @@ static float	turned_since(Quat from, Quat to)
 	return (2.0f * acosf(fminf(1.0f, fabsf(change.w))));
 }
 
+// Creeping: since its own anchor, never past SLEEP_CREEP_FACTOR times the sleep speeds on average.
+// It cannot reuse the rest window: that one restarts every step while the body moves, so any flight would count as a creep.
+static void	update_creep(RigidBody *body, float dt)
+{
+	float	allowance;
+
+	if (body->creepTimer == 0.0f)
+	{
+		body->creepPosition = body->position;
+		body->creepOrientation = body->orientation;
+	}
+	body->creepTimer += dt;
+	allowance = fmaxf(body->creepTimer, SLEEP_TIME);
+	if (vec3_length(vec3_sub(body->position, body->creepPosition)) >= SLEEP_CREEP_FACTOR * SLEEP_LINEAR_EPS * allowance
+		|| turned_since(body->creepOrientation, body->orientation) >= SLEEP_CREEP_FACTOR * SLEEP_ANGULAR_EPS * allowance)
+		body->creepTimer = 0.0f;
+}
+
 // Still: slow, or shaking in place: little net move, and past the first half of SLEEP_TIME a path SLEEP_JITTER_RATIO times longer.
 static int	at_rest(RigidBody *body, float dt)
 {
@@ -49,9 +67,7 @@ static int	at_rest(RigidBody *body, float dt)
 	moved = vec3_length(vec3_sub(body->position, body->restPosition));
 	turned = turned_since(body->restOrientation, body->orientation);
 	settling = (body->restWindow < 0.5f * SLEEP_TIME);
-	body->creepTimer += dt;
-	if (moved >= SLEEP_CREEP_FACTOR * SLEEP_LINEAR_EPS * allowance || turned >= SLEEP_CREEP_FACTOR * SLEEP_ANGULAR_EPS * allowance)
-		body->creepTimer = 0.0f;
+	update_creep(body, dt);
 	linear_still = (vec3_length(body->velocity) < SLEEP_LINEAR_EPS || (moved < SLEEP_LINEAR_EPS * allowance && (settling || body->restPath > SLEEP_JITTER_RATIO * moved)));
 	angular_still = (vec3_length(body->angularVelocity) < SLEEP_ANGULAR_EPS || (turned < SLEEP_ANGULAR_EPS * allowance && (settling || body->restTurnPath > SLEEP_JITTER_RATIO * turned)));
 	return (linear_still && angular_still);

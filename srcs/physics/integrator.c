@@ -18,6 +18,7 @@ static float	thickness(const Collider *collider)
 	return (fminf(extent.x, fminf(extent.y, extent.z)));
 }
 
+// a speed cap instead of a swept test, at most its thinnest dimension per step; it only bites small bodies thrown by
 // heavy fast ones (a 0.07 m rain ball thrown by a 50 kg apple), the upgrade is continuous collision detection.
 static void	clamp_speed(RigidBody *body, float dt)
 {

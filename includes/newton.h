@@ -284,6 +284,8 @@ typedef struct RigidBody
 	float		restTurnPath;
 	float		restWindow;
 	float		creepTimer;        // time spent creeping: no faster on average than SLEEP_CREEP_FACTOR times the sleep speeds
+	Vec3		creepPosition;     // pose when the creeping started, the creep speed is measured from it
+	Quat		creepOrientation;
 	int			ragdollId;         // 0 for a body that is no ragdoll part
 	int			ragdollPart;
 }	RigidBody;

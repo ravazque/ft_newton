@@ -87,7 +87,8 @@ static void	remember_contacts(World *world)
 		world->previousContacts = grown;
 		world->previousContactCapacity = world->contactCount;
 	}
-	memcpy(world->previousContacts, world->contacts, (size_t)world->contactCount * sizeof(Contact));
+	if (world->contactCount > 0)
+		memcpy(world->previousContacts, world->contacts, (size_t)world->contactCount * sizeof(Contact));
 	world->previousContactCount = world->contactCount;
 }
 
